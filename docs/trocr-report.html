@@ -1,0 +1,647 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Fine-Tuning TrOCR for Receipt OCR — SROIE 2019</title>
+<style>
+  /* ─── Print / PDF tweaks ─────────────────────────────────── */
+  @media print {
+    .no-print { display: none; }
+    .page-break { page-break-before: always; }
+    body { font-size: 11pt; }
+    h1 { font-size: 18pt; }
+    h2 { font-size: 14pt; }
+    h3 { font-size: 12pt; }
+  }
+
+  /* ─── Base ───────────────────────────────────────────────── */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    font-family: 'Segoe UI', Arial, sans-serif;
+    font-size: 10.5pt;
+    line-height: 1.75;
+    color: #1a1a2e;
+    background: #ffffff;
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 40px 48px 60px;
+  }
+
+  /* ─── Cover page ─────────────────────────────────────────── */
+  .cover {
+    text-align: center;
+    padding: 60px 0 50px;
+    border-bottom: 3px solid #16213e;
+    margin-bottom: 48px;
+  }
+  .cover .badge {
+    display: inline-block;
+    background: #16213e;
+    color: #e0e0e0;
+    font-size: 8.5pt;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    padding: 5px 18px;
+    border-radius: 20px;
+    margin-bottom: 20px;
+  }
+  .cover h1 {
+    font-size: 24pt;
+    font-weight: 800;
+    line-height: 1.25;
+    color: #0f3460;
+    margin-bottom: 12px;
+  }
+  .cover .subtitle {
+    font-size: 12pt;
+    color: #555;
+    margin-bottom: 32px;
+  }
+  .cover .meta-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px 32px;
+    max-width: 480px;
+    margin: 0 auto;
+    text-align: left;
+    font-size: 9.5pt;
+    color: #333;
+  }
+  .cover .meta-grid span:first-child { font-weight: 700; color: #0f3460; }
+
+  /* ─── Table of Contents ──────────────────────────────────── */
+  .toc { background: #f4f7fb; border-left: 4px solid #0f3460; padding: 20px 28px; border-radius: 6px; margin-bottom: 48px; }
+  .toc h2 { font-size: 11pt; margin-bottom: 12px; color: #0f3460; }
+  .toc ol { padding-left: 20px; line-height: 2.1; font-size: 10pt; }
+  .toc ol li a { text-decoration: none; color: #333; }
+  .toc ol li a:hover { color: #0f3460; text-decoration: underline; }
+
+  /* ─── Headings ───────────────────────────────────────────── */
+  h2 {
+    font-size: 15pt;
+    font-weight: 800;
+    color: #0f3460;
+    margin: 48px 0 12px;
+    padding-bottom: 6px;
+    border-bottom: 2px solid #e0e8f4;
+  }
+  h3 {
+    font-size: 11.5pt;
+    font-weight: 700;
+    color: #16213e;
+    margin: 28px 0 8px;
+  }
+
+  /* ─── Paragraphs ─────────────────────────────────────────── */
+  p { margin-bottom: 14px; }
+  ul, ol { padding-left: 22px; margin-bottom: 14px; }
+  li { margin-bottom: 5px; }
+
+  /* ─── Image placeholder ──────────────────────────────────── */
+  .img-block {
+    border: 2px dashed #b0c4de;
+    border-radius: 8px;
+    background: #f8fbff;
+    min-height: 220px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    color: #5a7fa8;
+    font-size: 9.5pt;
+    padding: 24px;
+    margin: 20px 0 10px;
+    position: relative;
+  }
+  .img-block .icon { font-size: 32pt; margin-bottom: 8px; opacity: 0.4; }
+  .img-block .caption { font-weight: 600; font-size: 10pt; color: #3a5f82; }
+  .img-block .hint { font-size: 8.5pt; color: #7fa3c4; margin-top: 4px; }
+  .figure-img {
+    width: 100%;
+    border: 1px solid #d7e2f0;
+    border-radius: 8px;
+    background: #fff;
+    margin: 16px 0 8px;
+    display: block;
+  }
+  .cover-logo {
+    width: min(300px, 55%);
+    min-width: 180px;
+    margin: 16px auto 0;
+    display: block;
+    border-radius: 8px;
+  }
+  figcaption {
+    font-size: 8.5pt;
+    text-align: center;
+    color: #666;
+    font-style: italic;
+    margin-bottom: 20px;
+  }
+
+  /* ─── Tables ─────────────────────────────────────────────── */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 9.5pt;
+    margin: 16px 0 20px;
+  }
+  th {
+    background: #0f3460;
+    color: #fff;
+    padding: 8px 12px;
+    text-align: left;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+  }
+  td {
+    padding: 7px 12px;
+    border-bottom: 1px solid #e0e8f4;
+  }
+  tr:nth-child(even) td { background: #f4f7fb; }
+  tr:hover td { background: #e8f0fa; }
+
+  /* ─── Code block ─────────────────────────────────────────── */
+  pre {
+    background: #1e1e2e;
+    color: #cdd6f4;
+    border-radius: 8px;
+    padding: 16px 20px;
+    font-size: 8.5pt;
+    overflow-x: auto;
+    line-height: 1.6;
+    margin: 14px 0 20px;
+  }
+  code { font-family: 'Consolas', 'Fira Code', monospace; }
+
+  /* ─── Metric cards ───────────────────────────────────────── */
+  .metric-row {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 14px;
+    margin: 20px 0 28px;
+  }
+  .metric-card {
+    background: linear-gradient(135deg, #0f3460 0%, #16213e 100%);
+    color: #fff;
+    border-radius: 10px;
+    padding: 16px 14px;
+    text-align: center;
+  }
+  .metric-card .val { font-size: 20pt; font-weight: 800; color: #a8d8ea; }
+  .metric-card .lbl { font-size: 8pt; text-transform: uppercase; letter-spacing: 1px; opacity: 0.8; margin-top: 4px; }
+
+  /* ─── Callout / Note boxes ───────────────────────────────── */
+  .callout {
+    border-left: 4px solid;
+    border-radius: 0 6px 6px 0;
+    padding: 12px 18px;
+    margin: 16px 0;
+    font-size: 9.5pt;
+  }
+  .callout.info    { border-color: #3a86ff; background: #eff5ff; }
+  .callout.warning { border-color: #f4a261; background: #fff8f0; }
+  .callout.success { border-color: #2ec4b6; background: #f0fbfa; }
+
+  /* ─── Section rule ───────────────────────────────────────── */
+  hr { border: none; border-top: 1px solid #e0e8f4; margin: 40px 0; }
+</style>
+</head>
+<body>
+
+<!-- ════════════════════════════════════════════════════════════
+     COVER PAGE
+═══════════════════════════════════════════════════════════════ -->
+<div class="cover">
+  <div class="badge">Deep Learning — Computer Vision</div>
+  <h1>Fine-Tuning TrOCR for Printed Receipt Text Recognition</h1>
+  <p class="subtitle">End-to-End Transformer OCR on the SROIE 2019 Dataset</p>
+  <img class="cover-logo" src="output/Gemini_Generated_Image_igqw5jigqw5jigqw.png" alt="Project visual identity"/>
+  <div class="meta-grid">
+    <span>Group members</span><span>Aziba Mohamed Ayoub · Ballou Moussa<br>Laidani Med Aymene · Oualid Benchiekh<br>Amjed Benayad</span>
+    <span>Dataset</span><span>SROIE 2019 (ICDAR)</span>
+    <span>Model</span><span>microsoft/trocr-base-printed (333 M params)</span>
+    <span>Training platform</span><span>Kaggle — NVIDIA Tesla T4</span>
+    <span>Academic year</span><span>2025 – 2026</span>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════
+     TABLE OF CONTENTS
+═══════════════════════════════════════════════════════════════ -->
+<div class="toc">
+  <h2>Table of Contents</h2>
+  <ol>
+    <li><a href="#introduction">Introduction</a></li>
+    <li><a href="#related-work">Related Work</a></li>
+    <li><a href="#data-exploration">Dataset & Data Exploration</a></li>
+    <li><a href="#architecture">Model Architecture</a></li>
+    <li><a href="#methodology">Methodology & Training</a></li>
+    <li><a href="#results">Results & Evaluation</a></li>
+    <li><a href="#discussion">Discussion & Limitations</a></li>
+    <li><a href="#future-work">Future Work & Open Directions</a></li>
+    <li><a href="#conclusion">Conclusion</a></li>
+    <li><a href="#references">References</a></li>
+  </ol>
+</div>
+
+<!-- ════════════════════════════════════════════════════════════
+     1. INTRODUCTION
+═══════════════════════════════════════════════════════════════ -->
+<h2 id="introduction">1. Introduction</h2>
+
+<p>Optical Character Recognition (OCR) on scanned receipts is a foundational task for many real-world document intelligence pipelines. Unlike OCR on clean typeset documents, receipts present particular challenges: variable print quality, irregular fonts, multi-column layouts (item name alongside price), rotated text, low-contrast ink, and physical damage.</p>
+
+<p>In this project we fine-tune <strong>TrOCR</strong> (<em>microsoft/trocr-base-printed</em>), a fully Transformer-based OCR model, on the <strong>SROIE 2019</strong> dataset — the standard benchmark for scanned Malaysian receipt understanding from ICDAR 2019. Our goal is to achieve high character-level accuracy on individual text-line crops extracted from receipts and to understand both the strengths and failure modes of this approach as a stepping stone toward more robust document-understanding systems.</p>
+
+<p>The remainder of this report is structured as follows: Section 2 reviews related work; Section 3 describes the dataset and our exploratory analysis; Section 4 details the model architecture; Section 5 covers the training methodology; Section 6 presents quantitative and qualitative results; Sections 7–8 discuss limitations and future directions; and Section 9 concludes.</p>
+
+<!-- ════════════════════════════════════════════════════════════
+     2. RELATED WORK
+═══════════════════════════════════════════════════════════════ -->
+<h2 id="related-work">2. Related Work</h2>
+
+<h3>2.1 Classical OCR Pipelines</h3>
+<p>Traditional OCR systems follow a detect-then-recognise paradigm. Scene-text detectors (EAST, CRAFT, DBNet) localise word or line bounding boxes; a subsequent recogniser then reads each crop. Recognisers have historically relied on a CNN feature extractor followed by a CTC-decoded LSTM — the CRNN family. While effective for clean printed text, these architectures struggle to model long-range context and require separate language-model post-processing.</p>
+
+<h3>2.2 Transformer-Based OCR</h3>
+<p>The introduction of the Vision Transformer (ViT) and the success of Sequence-to-Sequence Transformers in NLP motivated purely attention-based OCR. <strong>TrOCR</strong> (Li et al., 2021) combines a ViT encoder with a RoBERTa-initialised autoregressive decoder, achieving state-of-the-art results on printed, scene, and handwritten benchmarks without any CTC layer or CNN backbone. Its encoder processes images as flat patch sequences, giving it a natural ability to attend globally — well-suited to the variable-length text found on receipts.</p>
+
+<h3>2.3 Document Understanding on SROIE</h3>
+<p>SROIE 2019 (Scanned Receipts OCR and Information Extraction) was introduced at ICDAR 2019 and consists of three tasks: (1) OCR, (2) keyword spotting, and (3) information extraction. Many winning approaches on Task 1 use CNN-LSTM-CTC pipelines; more recently, Transformer-based recognisers fine-tuned on SROIE have demonstrated competitive word-error rates. LayoutLM and its successors extend this to joint text+layout modelling, but still rely on OCR as an upstream component — motivating work on the OCR stage quality.</p>
+
+<!-- ════════════════════════════════════════════════════════════
+     3. DATASET & DATA EXPLORATION
+═══════════════════════════════════════════════════════════════ -->
+<h2 id="data-exploration">3. Dataset &amp; Data Exploration</h2>
+
+<h3>3.1 Overview</h3>
+<p>The SROIE 2019 dataset contains <strong>973 scanned receipt images</strong> sourced from Malaysian supermarkets and convenience stores, split into 626 training and 347 test receipts. Each image is annotated with:</p>
+<ul>
+  <li><strong>Box files</strong> — one line per text region, encoded as 8-point polygons (x₁,y₁,…,x₄,y₄) followed by the transcription text.</li>
+  <li><strong>Entity files</strong> — JSON with four key-value fields: <code>company</code>, <code>date</code>, <code>address</code>, <code>total</code>.</li>
+</ul>
+
+<table>
+  <thead><tr><th>Split</th><th>Receipts</th><th>Text-line Crops</th><th>Used in This Work</th></tr></thead>
+  <tbody>
+    <tr><td>Train</td><td>626</td><td>33,539</td><td>10,000 (compute budget)</td></tr>
+    <tr><td>Validation</td><td>—</td><td>3,354</td><td>Full</td></tr>
+    <tr><td>Test</td><td>347</td><td>18,645</td><td>2,000 (eval subset)</td></tr>
+  </tbody>
+</table>
+
+<figure>
+  <img class="figure-img" src="output/split_pie.png" alt="Dataset split at crop level for train validation and test"/>
+  <figcaption>Fig. 0 — Crop-level split used in this project: 30,187 train (57.8%), 3,354 validation (6.4%), and 18,647 test (35.7%) text-line samples.</figcaption>
+</figure>
+
+<h3>3.2 Image-Level Statistics</h3>
+<p>Receipt images exhibit substantial resolution variance. Most images are portrait-oriented (W/H ≈ 0.4–0.7) with heights ranging from roughly 1,000 to 4,000 px. A small number of images are wider than they are tall (rotated receipts). The diverse resolutions necessitate resizing at the preprocessing stage.</p>
+
+<figure>
+  <img class="figure-img" src="output/image_stats.png" alt="Image width height and aspect ratio distributions"/>
+  <figcaption>Fig. 1 — Histograms of receipt image dimensions across the 626 training receipts. Most images are tall and narrow, consistent with portrait-format receipts.</figcaption>
+</figure>
+
+<h3>3.3 Text-Line Statistics</h3>
+<p>The 33,539 training crops have a mean label length of approximately <strong>13–15 characters</strong>. The distribution is right-skewed: a majority of lines are short (store name abbreviations, prices, dates), while a small tail of very long lines (e.g., full addresses) exists. Fewer than 1% of labels exceed the TrOCR max_length of 64 tokens, meaning truncation is not a significant concern.</p>
+
+<figure>
+  <img class="figure-img" src="output/label_stats.png" alt="Label length distribution and lines per receipt"/>
+  <figcaption>Fig. 2 — (Left) Distribution of text-line label lengths in characters. The red dashed line marks the TrOCR <code>max_length=64</code> cutoff. (Right) Number of annotated lines per receipt.</figcaption>
+</figure>
+
+<figure>
+  <img class="figure-img" src="output/crop_dims.png" alt="Text-line crop width height and aspect ratio distributions"/>
+  <figcaption>Fig. 2b — Crop-level dimension statistics from a 100-receipt sample. Most text-line crops are narrow and low-height, with a long-tail of large aspect ratios.</figcaption>
+</figure>
+
+<h3>3.4 Character Vocabulary</h3>
+<p>The training corpus contains around <strong>90–100 unique character types</strong>. Uppercase Latin letters, digits, and punctuation (periods, slashes, parentheses) dominate. Currency symbols (<code>$</code>, <code>RM</code>), the percent sign, and the at-sign (<code>@</code>) appear regularly — reflecting the financial nature of receipt text. Lowercase letters are less frequent, as many receipt printers capitalise all text. The character frequency analysis directly informed our choice of the BPE tokenizer bundled with <em>trocr-base-printed</em>, which covers the full vocabulary.</p>
+
+<figure>
+  <img class="figure-img" src="output/char_freq.png" alt="Top 40 character frequency histogram"/>
+  <figcaption>Fig. 3 — Frequency of the 40 most common characters across all training labels. Spaces, uppercase letters, and digits are the dominant classes.</figcaption>
+</figure>
+
+<h3>3.5 Sample Receipt &amp; Crops</h3>
+
+<figure>
+  <img class="figure-img" src="output/sample_receipt_boxes.png" alt="Annotated receipt with line bounding boxes"/>
+  <figcaption>Fig. 4 — A training receipt with all annotated bounding boxes overlaid in green. Each box corresponds to one text line that is cropped and fed to TrOCR.</figcaption>
+</figure>
+
+<figure>
+  <img class="figure-img" src="output/sample_crops.png" alt="Random text-line crop examples from training set"/>
+  <figcaption>Fig. 5 — Random text-line crops with their ground-truth transcriptions as titles. Note the variation in font size, contrast, and text content.</figcaption>
+</figure>
+
+<h3>3.6 Preprocessing Pipeline</h3>
+<p>Each annotated text line undergoes the following pipeline before being fed to the model:</p>
+<ol>
+  <li>Parse the 8-point polygon from the box file → compute axis-aligned bounding rectangle.</li>
+  <li>Crop the PIL image to the bounding rectangle.</li>
+  <li>Skip degenerate crops (width &lt; 10 px or height &lt; 5 px).</li>
+  <li><code>TrOCRProcessor</code>: resize to <strong>384 × 384</strong> px, normalise pixel values to [−1, 1].</li>
+  <li>Tokenize label with BPE, <code>max_length=64</code>, <code>truncation=True</code>, <code>padding="max_length"</code>.</li>
+  <li>Replace padding tokens with <code>−100</code> so they are ignored by the cross-entropy loss.</li>
+</ol>
+
+<figure>
+  <img class="figure-img" src="output/preprocessing_example.png" alt="Original crop compared with TrOCR preprocessing output"/>
+  <figcaption>Fig. 6 — Side-by-side comparison of a raw text-line crop and the same image after TrOCRProcessor resizing. The aggressive resize is well-suited to ViT patch embedding.</figcaption>
+</figure>
+
+<!-- ════════════════════════════════════════════════════════════
+     4. MODEL ARCHITECTURE
+═══════════════════════════════════════════════════════════════ -->
+<div class="page-break"></div>
+<h2 id="architecture">4. Model Architecture</h2>
+
+<h3>4.1 TrOCR Overview</h3>
+<p>TrOCR is a pure-Transformer sequence-to-sequence model for OCR, proposed by Li et al. (2021). It requires no CNN feature extractor and no CTC decoding. The encoder processes an input image; the decoder autoregressively generates the text token-by-token.</p>
+
+<figure>
+  <div class="img-block">
+    <div class="icon">🏗️</div>
+    <div class="caption">Figure 7 — TrOCR Architecture Diagram</div>
+    <div class="hint">Insert architecture diagram here (encoder → cross-attention → decoder)</div>
+  </div>
+  <figcaption>Fig. 7 — Overview of the TrOCR encoder-decoder architecture. The ViT encoder splits the image into 16×16 patches; the RoBERTa-based decoder attends to the encoder outputs via cross-attention.</figcaption>
+</figure>
+
+<h3>4.2 Encoder — Vision Transformer (ViT-Base)</h3>
+<p>The encoder is a <strong>ViT-Base/16</strong> initialised from a pre-trained image classification checkpoint. The input image (384 × 384) is divided into non-overlapping 16 × 16 patches, yielding a sequence of 576 patch embeddings. A learnable [CLS] token is prepended, and fixed 2-D sinusoidal positional embeddings are added. The sequence passes through 12 self-attention transformer blocks (hidden dim 768, 12 heads, MLP ratio 4×), producing a contextual representation of the entire image that serves as the encoder memory.</p>
+
+<h3>4.3 Decoder — RoBERTa-Based Autoregressive Decoder</h3>
+<p>The decoder is initialised from <strong>RoBERTa-base</strong>. It receives the previously generated output tokens and attends to the encoder output via multi-head cross-attention, generating the next token at each step. Decoding is performed with beam search (beam size 4) to suppress noisy predictions.</p>
+
+<table>
+  <thead><tr><th>Component</th><th>Pre-training</th><th>Parameters</th></tr></thead>
+  <tbody>
+    <tr><td>ViT Encoder</td><td>BEiT image classification</td><td>~86 M</td></tr>
+    <tr><td>RoBERTa Decoder</td><td>English text MLM</td><td>~125 M</td></tr>
+    <tr><td>Cross-attention bridges</td><td>Randomly initialised</td><td>~12 M</td></tr>
+    <tr><td><strong>Total</strong></td><td></td><td><strong>~333 M</strong></td></tr>
+  </tbody>
+</table>
+
+<h3>4.4 Why TrOCR for Receipts?</h3>
+<p>Several properties make TrOCR well-suited to printed receipt OCR:</p>
+<ul>
+  <li>The ViT encoder has a <em>global receptive field</em> from the first layer, capturing context across the full line — important for ligatures and touching characters common in receipt fonts.</li>
+  <li>The autoregressive decoder implicitly learns a language model of receipt text, reducing errors on common tokens (prices, dates, abbreviations).</li>
+  <li>No explicit segmentation step is required: the model directly maps pixels to characters.</li>
+</ul>
+
+<!-- ════════════════════════════════════════════════════════════
+     5. METHODOLOGY & TRAINING
+═══════════════════════════════════════════════════════════════ -->
+<h2 id="methodology">5. Methodology &amp; Training</h2>
+
+<h3>5.1 Experimental Setup</h3>
+<table>
+  <thead><tr><th>Hyperparameter</th><th>Value</th></tr></thead>
+  <tbody>
+    <tr><td>Base model</td><td>microsoft/trocr-base-printed</td></tr>
+    <tr><td>Optimizer</td><td>AdamW (β₁=0.9, β₂=0.999, ε=1e-8)</td></tr>
+    <tr><td>Learning rate</td><td>5 × 10⁻⁵</td></tr>
+    <tr><td>LR schedule</td><td>Linear warmup (1,000 steps) → linear decay</td></tr>
+    <tr><td>Gradient clipping</td><td>Max norm 1.0</td></tr>
+    <tr><td>Batch size</td><td>8</td></tr>
+    <tr><td>Epochs</td><td>8</td></tr>
+    <tr><td>Training samples</td><td>10,000 (Kaggle session limit)</td></tr>
+    <tr><td>Hardware</td><td>Kaggle — NVIDIA Tesla T4 (16 GB VRAM)</td></tr>
+    <tr><td>Image size</td><td>384 × 384</td></tr>
+    <tr><td>Max token length</td><td>64</td></tr>
+  </tbody>
+</table>
+
+<h3>5.2 Loss Function</h3>
+<p>The model is trained with <strong>teacher-forcing</strong>: the ground-truth token sequence is fed as decoder input, shifted right by one position. The loss is the standard <strong>cross-entropy</strong> between the predicted logits and the target tokens, with padding positions masked out (label = −100).</p>
+
+<h3>5.3 Validation &amp; Checkpointing</h3>
+<p>After each epoch, Character Error Rate (CER) is computed on the full validation set (3,354 crops) using greedy decoding. The best checkpoint (lowest Val CER) is saved to disk. The best model was saved at <strong>Epoch 7</strong> with Val CER = 2.45%.</p>
+
+<h3>5.4 Training Curves</h3>
+
+<figure>
+  <div class="img-block">
+    <div class="icon">📈</div>
+    <div class="caption">Figure 8 — Training Loss &amp; Validation CER per Epoch</div>
+    <div class="hint">Generated by: <code>trocr-evaluation.ipynb</code> → <code>training_curves.png</code></div>
+  </div>
+  <figcaption>Fig. 8 — (Left) Training cross-entropy loss across 8 epochs. (Right) Validation CER, with the best value of 2.45% achieved at Epoch 7 marked by a dashed reference line.</figcaption>
+</figure>
+
+<table>
+  <thead><tr><th>Epoch</th><th>Train Loss</th><th>Val CER</th><th>Val WER</th></tr></thead>
+  <tbody>
+    <tr><td>1</td><td>0.6652</td><td>0.3684</td><td>0.4583</td></tr>
+    <tr><td>2</td><td>0.5772</td><td>0.2315</td><td>0.3537</td></tr>
+    <tr><td>3</td><td>0.3746</td><td>0.1136</td><td>0.2383</td></tr>
+    <tr><td>4</td><td>0.2237</td><td>0.0721</td><td>0.1752</td></tr>
+    <tr><td>5</td><td>0.1274</td><td>0.0722</td><td>0.1443</td></tr>
+    <tr><td>6</td><td>0.0815</td><td>0.0462</td><td>0.1244</td></tr>
+    <tr><td><strong>7 ✓</strong></td><td><strong>0.0364</strong></td><td><strong>0.0245</strong></td><td><strong>0.0902</strong></td></tr>
+    <tr><td>8</td><td>0.0168</td><td>0.0250</td><td>0.0917</td></tr>
+  </tbody>
+</table>
+
+<!-- ════════════════════════════════════════════════════════════
+     6. RESULTS
+═══════════════════════════════════════════════════════════════ -->
+<div class="page-break"></div>
+<h2 id="results">6. Results &amp; Evaluation</h2>
+
+<h3>6.1 Summary Metrics</h3>
+
+<div class="metric-row">
+  <div class="metric-card">
+    <div class="val">97.97%</div>
+    <div class="lbl">Character Accuracy</div>
+  </div>
+  <div class="metric-card">
+    <div class="val">91.44%</div>
+    <div class="lbl">Word Accuracy</div>
+  </div>
+  <div class="metric-card">
+    <div class="val">88.65%</div>
+    <div class="lbl">Exact Match Rate</div>
+  </div>
+  <div class="metric-card">
+    <div class="val">88.6%</div>
+    <div class="lbl">Perfect Lines</div>
+  </div>
+</div>
+
+<table>
+  <thead><tr><th>Metric</th><th>Value</th><th>Interpretation</th></tr></thead>
+  <tbody>
+    <tr><td>Test CER</td><td>0.0203</td><td>On average 2.03% of characters are wrong</td></tr>
+    <tr><td>Test WER</td><td>0.0856</td><td>8.56% of word tokens contain at least one error</td></tr>
+    <tr><td>Exact Match Rate</td><td>88.65% (1,773/2,000)</td><td>Full line predicted correctly</td></tr>
+    <tr><td>Median CER</td><td>0.0000</td><td>Majority of lines are perfectly transcribed</td></tr>
+    <tr><td>Mean CER</td><td>0.0142</td><td>Average per-line character error rate</td></tr>
+    <tr><td>Std CER</td><td>0.0604</td><td>High variance — a few very hard lines skew the mean</td></tr>
+    <tr><td>% lines CER &lt; 0.1</td><td>95.0%</td><td>Near-perfect on the vast majority</td></tr>
+    <tr><td>% lines CER &gt; 0.5</td><td>0.2%</td><td>Catastrophic failures are very rare</td></tr>
+  </tbody>
+</table>
+
+<div class="callout success">
+  <strong>Key finding:</strong> The median CER is <strong>0.0000</strong>, meaning more than half of all test lines are transcribed without a single error. The model shows strong, consistent performance on the bulk of the data.
+</div>
+
+<h3>6.2 CER Distribution</h3>
+
+<figure>
+  <div class="img-block">
+    <div class="icon">📉</div>
+    <div class="caption">Figure 9 — Per-Sample CER Distribution (Histogram &amp; CDF)</div>
+    <div class="hint">Generated by: <code>trocr-evaluation.ipynb</code> → <code>cer_distribution.png</code></div>
+  </div>
+  <figcaption>Fig. 9 — Distribution of per-line CER values across the 2,000 test samples. The large mass at CER = 0 confirms that most lines are perfectly predicted; a long right tail corresponds to the small fraction of difficult lines.</figcaption>
+</figure>
+
+<h3>6.3 Qualitative Examples</h3>
+
+<h4>Best Predictions (CER = 0)</h4>
+<table>
+  <thead><tr><th>Ground Truth</th><th>Prediction</th><th>CER</th></tr></thead>
+  <tbody>
+    <tr><td>#01-01</td><td>#01-01</td><td>0.000</td></tr>
+    <tr><td>$7.10</td><td>$7.10</td><td>0.000</td></tr>
+    <tr><td>( GST REG. NO. 000992739328 )</td><td>( GST REG. NO. 000992739328 )</td><td>0.000</td></tr>
+    <tr><td>#1010802</td><td>#1010802</td><td>0.000</td></tr>
+    <tr><td>(1-3)</td><td>(1-3)</td><td>0.000</td></tr>
+  </tbody>
+</table>
+
+<h4>Worst Predictions</h4>
+<table>
+  <thead><tr><th>Ground Truth</th><th>Prediction</th><th>CER</th></tr></thead>
+  <tbody>
+    <tr><td>V</td><td>VI</td><td>1.000</td></tr>
+    <tr><td>A</td><td>^</td><td>1.000</td></tr>
+    <tr><td>UJI</td><td>U01</td><td>0.667</td></tr>
+    <tr><td>1 SMALL CONE</td><td>1 SMALL COME AGAVE</td><td>0.583</td></tr>
+    <tr><td>NET AMT @ GST6%</td><td>WWX AMT 6%</td><td>0.533</td></tr>
+    <tr><td>T H A N K  Y O U</td><td>THANK YOU</td><td>0.438</td></tr>
+    <tr><td>CASHIER: THANDAR</td><td>CASHIER: NICOLE</td><td>0.438</td></tr>
+    <tr><td>(GST REG NO. 001492992000)</td><td>(GST REG NO. 001492929292929292000)</td><td>0.346</td></tr>
+  </tbody>
+</table>
+
+<figure>
+  <div class="img-block">
+    <div class="icon">🔍</div>
+    <div class="caption">Figure 10 — Qualitative Prediction Examples (Best &amp; Worst)</div>
+    <div class="hint">Generated by: <code>trocr-evaluation.ipynb</code> → <code>qualitative_examples.png</code></div>
+  </div>
+  <figcaption>Fig. 10 — Visual comparison of best and worst predictions alongside their source crops. Failure cases are dominated by very short strings, spaced-out characters, and ambiguous symbols.</figcaption>
+</figure>
+
+<!-- ════════════════════════════════════════════════════════════
+     7. DISCUSSION & LIMITATIONS
+═══════════════════════════════════════════════════════════════ -->
+<h2 id="discussion">7. Discussion &amp; Limitations</h2>
+
+<h3>7.1 Strengths</h3>
+<p>The fine-tuned TrOCR model achieves <strong>97.97% character accuracy</strong> and an <strong>88.65% exact-match rate</strong> on the SROIE test set, demonstrating that a Transformer-based model can be effectively adapted to receipt OCR with as few as 10,000 training samples. Prices, product codes, GST registration numbers, and other structured tokens are recognised near-perfectly — exactly the tokens most important for downstream extraction tasks.</p>
+
+<h3>7.2 Failure Mode Analysis</h3>
+<ul>
+  <li><strong>Very short strings (1–3 chars):</strong> Ambiguous visual context leads to substitutions and insertions. "V" → "VI", "A" → "^".</li>
+  <li><strong>Letter-spaced text:</strong> "T H A N K  Y O U" is collapsed to "THANK YOU" because the model's tokenizer operates on connected words, not spaced characters.</li>
+  <li><strong>Repetition artifacts:</strong> "(GST REG NO. 001492929292929292000)" shows that the decoder can enter a repetition loop on long numerical sequences — a known failure mode of autoregressive models.</li>
+  <li><strong>Low-frequency tokens:</strong> Rare proper nouns (e.g., "THANDAR") are hallucinated as more frequent alternatives ("NICOLE").</li>
+  <li><strong>Symbol ambiguity:</strong> "@" is misread as "@@8" in one case, suggesting the model has seen few examples with this character.</li>
+</ul>
+
+<h3>7.3 Impact of Training Subset</h3>
+<p>Due to Kaggle GPU session time limits, only 10,000 of the 33,539 available training crops were used. Training on the full set would likely push CER below 1% and reduce the long tail of failure cases. The rapid CER improvement from Epoch 1 to 7 (36.84% → 2.45%) suggests the model has not yet fully converged.</p>
+
+<h3>7.4 Sliding-Window Inference Limitation</h3>
+<p>When used for full-page inference (via the Gradio demo), the model was applied with a sliding-window approach over the full receipt image rather than using ground-truth crop coordinates. This introduces misalignment artifacts: multi-column lines (item name + price side by side) confuse the model because it was trained exclusively on single-column crops. A detect-then-recognise pipeline — pairing a text detector (e.g., DBNet, CRAFT) with TrOCR — would resolve this.</p>
+
+<div class="callout warning">
+  <strong>Important:</strong> The strong test metrics (CER 2.03%) are measured on <em>ground-truth crops</em>. End-to-end performance on unsegmented receipts is lower, because detection errors compound recognition errors. This gap motivates the detect-then-recognise pipeline described in Section 8.
+</div>
+
+<!-- ════════════════════════════════════════════════════════════
+     8. FUTURE WORK
+═══════════════════════════════════════════════════════════════ -->
+<div class="page-break"></div>
+<h2 id="future-work">8. Future Work &amp; Open Directions</h2>
+
+<p>This section outlines concrete directions for improving the current system. The approach is deliberately open: each direction may be explored independently or in combination.</p>
+
+<h3>8.1 Train on the Full Dataset</h3>
+<p>The most immediate improvement is to use all 33,539 training crops, potentially with additional data augmentation (brightness jitter, affine transforms, synthetic noise), to further reduce CER and improve robustness to print quality variations.</p>
+
+<h3>8.2 Detect-Then-Recognise Pipeline</h3>
+<p>Integrating a dedicated text detector (CRAFT, DBNet++, or the detection branch of PaddleOCR) upstream of TrOCR would eliminate the need for ground-truth bounding boxes at inference time and enable robust end-to-end receipt processing. Evaluation should then use end-to-end CER (detection + recognition combined).</p>
+
+<h3>8.3 Larger TrOCR Variants</h3>
+<p><em>microsoft/trocr-large-printed</em> uses ViT-Large as encoder and is pre-trained on a much larger synthetic corpus. Fine-tuning this variant on SROIE is expected to further improve metrics, at the cost of 3–4× more parameters and inference time.</p>
+
+<h3>8.4 Alternative Architectures</h3>
+<table>
+  <thead><tr><th>Architecture</th><th>Key Advantage</th><th>Reference</th></tr></thead>
+  <tbody>
+    <tr><td>PaddleOCR (PP-OCRv4)</td><td>Lightweight, fast, strong open-source baseline</td><td>Du et al., 2022</td></tr>
+    <tr><td>SVTR (Single Visual model for Text Recognition)</td><td>ViT-style without a separate decoder; fast inference</td><td>Du et al., 2022</td></tr>
+    <tr><td>ABINet</td><td>Iterative correction with a language model in the loop</td><td>Fang et al., 2021</td></tr>
+    <tr><td>LayoutLMv3</td><td>Joint vision–language pre-training with 2D layout</td><td>Huang et al., 2022</td></tr>
+    <tr><td>Donut (Document Understanding Transformer)</td><td>OCR-free end-to-end document parsing</td><td>Kim et al., 2022</td></tr>
+  </tbody>
+</table>
+
+<h3>8.5 Post-Processing &amp; Language Model Re-scoring</h3>
+<p>A character-level or word-level language model trained on receipt text could be used to re-rank beam hypotheses, reducing errors on low-frequency but predictable tokens (store names, product codes). Even a simple receipt-domain word list used for constrained decoding would reduce substitution errors on known vocabulary.</p>
+
+<h3>8.6 Information Extraction Integration</h3>
+<p>The ultimate goal of receipt OCR is to extract structured entities (total, date, company, address). Plugging the fine-tuned TrOCR into a downstream Named Entity Recognition model (e.g., LayoutLMv3 fine-tuned on SROIE Task 3) would enable end-to-end evaluation of the full pipeline and expose which OCR errors propagate into extraction errors.</p>
+
+<h3>8.7 Synthetic Data Augmentation</h3>
+<p>Generating synthetic receipts with diverse fonts, paper textures, and realistic degradations (creases, shadows, stains) using tools such as doctr's augmentation pipeline or custom PIL-based renderers could substantially expand the effective training set and improve robustness in real-world conditions.</p>
+
+<!-- ════════════════════════════════════════════════════════════
+     9. CONCLUSION
+═══════════════════════════════════════════════════════════════ -->
+<h2 id="conclusion">9. Conclusion</h2>
+
+<p>We presented a fine-tuning study of <strong>TrOCR (microsoft/trocr-base-printed)</strong> on the SROIE 2019 printed receipt dataset. Starting from a pre-trained encoder-decoder Transformer, we trained on 10,000 text-line crops for 8 epochs using a standard AdamW + linear-warmup schedule on a single T4 GPU. The resulting model achieves a <strong>Character Error Rate of 2.03%</strong>, <strong>Word Error Rate of 8.56%</strong>, and an <strong>Exact Match Rate of 88.65%</strong> on a 2,000-sample test subset.</p>
+
+<p>The model excels at structured tokens — prices, registration numbers, product codes — which are the most relevant fields for downstream extraction. Failure cases are concentrated on very short strings, letter-spaced decorative text, and rare proper nouns. These failure modes are well-understood and addressable through a combination of more training data, a detection stage, and post-processing.</p>
+
+<p>This work serves as a strong baseline for receipt OCR and a foundation for future work integrating richer architectures, larger models, and end-to-end document understanding pipelines.</p>
+
+<!-- ════════════════════════════════════════════════════════════
+     REFERENCES
+═══════════════════════════════════════════════════════════════ -->
+<h2 id="references">References</h2>
+
+<ol style="font-size:9.5pt; line-height:1.9;">
+  <li>Li, M., Lv, T., Chen, J., Cui, L., Lu, Y., Florencio, D., … &amp; Wei, F. (2021). <em>TrOCR: Transformer-based Optical Character Recognition with Pre-trained Models.</em> arXiv:2109.10282.</li>
+  <li>Huang, Y., Lv, T., Cui, L., Lu, Y., &amp; Wei, F. (2022). <em>LayoutLMv3: Pre-Training for Document AI with Unified Text and Image Masking.</em> ACM MM 2022.</li>
+  <li>Huang, Z., Chen, K., He, J., Bai, X., Karatzas, D., Lu, S., &amp; Jawahar, C. V. (2019). <em>ICDAR2019 Competition on Scanned Receipt OCR and Information Extraction (SROIE).</em> ICDAR 2019.</li>
+  <li>Kim, G., Hong, T., Yim, M., Park, J., Yim, J., Hwang, W., … &amp; Park, S. (2022). <em>OCR-free Document Understanding Transformer.</em> ECCV 2022.</li>
+  <li>Dosovitskiy, A., Beyer, L., Kolesnikov, A., Weissenborn, D., Zhai, X., Unterthiner, T., … &amp; Houlsby, N. (2021). <em>An Image is Worth 16×16 Words: Transformers for Image Recognition at Scale.</em> ICLR 2021.</li>
+  <li>Liu, Y., Ott, M., Goyal, N., Du, J., Joshi, M., Chen, D., … &amp; Stoyanov, V. (2019). <em>RoBERTa: A Robustly Optimized BERT Pretraining Approach.</em> arXiv:1907.11692.</li>
+  <li>Du, Y., Chen, Z., Jia, C., Yin, X., Zheng, T., Li, C., … &amp; Tian, Q. (2022). <em>SVTR: Scene Text Recognition with a Single Visual Model.</em> IJCAI 2022.</li>
+  <li>Fang, S., Xie, H., Wang, Y., Mao, Z., &amp; Zhang, Y. (2021). <em>Read Like Humans: Autonomous, Bidirectional and Iterative Language Modeling for Scene Text Recognition.</em> CVPR 2021.</li>
+</ol>
+
+<hr/>
+<p style="text-align:center; font-size:8pt; color:#999; margin-top:32px;">
+  Report generated for academic submission · TrOCR Receipt OCR Project · 2025–2026
+</p>
+
+</body>
+</html>
