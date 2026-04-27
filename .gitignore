@@ -6,3 +6,5 @@ checkpoints/
 *.pt
 wandb/
 .ipynb_checkpoints/
+.gradio/
+model/

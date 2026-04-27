@@ -1,0 +1,933 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mini Project — Implementation Plan</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #0b0c10;
+    --surface: #13151c;
+    --surface2: #1c1f2b;
+    --accent: #00e5ff;
+    --accent2: #7c3aed;
+    --accent3: #f59e0b;
+    --text: #e2e8f0;
+    --muted: #64748b;
+    --border: rgba(255,255,255,0.07);
+    --tag-bg: rgba(0,229,255,0.08);
+  }
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 14px;
+    line-height: 1.7;
+    min-height: 100vh;
+    overflow-x: hidden;
+  }
+
+  /* ── Grid background ── */
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(0,229,255,0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(0,229,255,0.03) 1px, transparent 1px);
+    background-size: 40px 40px;
+    pointer-events: none;
+    z-index: 0;
+  }
+
+  .wrapper {
+    position: relative;
+    z-index: 1;
+    max-width: 960px;
+    margin: 0 auto;
+    padding: 60px 32px 100px;
+  }
+
+  /* ── Header ── */
+  .header {
+    border-left: 3px solid var(--accent);
+    padding-left: 24px;
+    margin-bottom: 64px;
+    animation: fadeUp 0.6s ease both;
+  }
+
+  .header .label {
+    font-size: 11px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 12px;
+  }
+
+  .header h1 {
+    font-family: 'Syne', sans-serif;
+    font-size: clamp(28px, 5vw, 48px);
+    font-weight: 800;
+    line-height: 1.1;
+    color: #fff;
+    margin-bottom: 16px;
+  }
+
+  .header h1 span {
+    color: var(--accent);
+  }
+
+  .header .subtitle {
+    color: var(--muted);
+    font-size: 13px;
+    max-width: 540px;
+  }
+
+  .meta-row {
+    display: flex;
+    gap: 20px;
+    flex-wrap: wrap;
+    margin-top: 24px;
+  }
+
+  .meta-tag {
+    background: var(--tag-bg);
+    border: 1px solid rgba(0,229,255,0.2);
+    color: var(--accent);
+    font-size: 11px;
+    letter-spacing: 0.1em;
+    padding: 4px 12px;
+    border-radius: 2px;
+    text-transform: uppercase;
+  }
+
+  .meta-tag.purple {
+    background: rgba(124,58,237,0.1);
+    border-color: rgba(124,58,237,0.3);
+    color: #a78bfa;
+  }
+
+  .meta-tag.amber {
+    background: rgba(245,158,11,0.1);
+    border-color: rgba(245,158,11,0.3);
+    color: var(--accent3);
+  }
+
+  /* ── Section ── */
+  .section {
+    margin-bottom: 52px;
+    animation: fadeUp 0.6s ease both;
+  }
+
+  .section:nth-child(2) { animation-delay: 0.1s; }
+  .section:nth-child(3) { animation-delay: 0.15s; }
+  .section:nth-child(4) { animation-delay: 0.2s; }
+  .section:nth-child(5) { animation-delay: 0.25s; }
+  .section:nth-child(6) { animation-delay: 0.3s; }
+  .section:nth-child(7) { animation-delay: 0.35s; }
+  .section:nth-child(8) { animation-delay: 0.4s; }
+
+  .section-header {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin-bottom: 24px;
+  }
+
+  .section-num {
+    font-family: 'Syne', sans-serif;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--accent);
+    letter-spacing: 0.15em;
+    background: var(--tag-bg);
+    border: 1px solid rgba(0,229,255,0.2);
+    padding: 3px 8px;
+    border-radius: 2px;
+    min-width: 36px;
+    text-align: center;
+  }
+
+  .section-title {
+    font-family: 'Syne', sans-serif;
+    font-size: 18px;
+    font-weight: 700;
+    color: #fff;
+    letter-spacing: 0.02em;
+  }
+
+  .divider {
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+  }
+
+  /* ── Cards ── */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 24px;
+    margin-bottom: 16px;
+    transition: border-color 0.2s, transform 0.2s;
+  }
+
+  .card:hover {
+    border-color: rgba(0,229,255,0.2);
+    transform: translateX(4px);
+  }
+
+  .card-title {
+    font-family: 'Syne', sans-serif;
+    font-weight: 700;
+    color: #fff;
+    margin-bottom: 8px;
+    font-size: 15px;
+  }
+
+  .card p {
+    color: var(--muted);
+    font-size: 13px;
+    line-height: 1.8;
+  }
+
+  .card .highlight {
+    color: var(--accent);
+  }
+
+  /* ── Phase timeline ── */
+  .phases {
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+  }
+
+  .phase {
+    display: grid;
+    grid-template-columns: 120px 1px 1fr;
+    gap: 0 24px;
+    position: relative;
+  }
+
+  .phase-label {
+    text-align: right;
+    padding: 20px 0;
+  }
+
+  .phase-label .week {
+    font-family: 'Syne', sans-serif;
+    font-weight: 700;
+    font-size: 12px;
+    color: var(--accent);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+
+  .phase-label .duration {
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 2px;
+  }
+
+  .phase-line {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    position: relative;
+  }
+
+  .phase-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: var(--accent);
+    margin-top: 24px;
+    box-shadow: 0 0 10px var(--accent);
+    flex-shrink: 0;
+    z-index: 1;
+  }
+
+  .phase-connector {
+    flex: 1;
+    width: 1px;
+    background: var(--border);
+    margin-top: 4px;
+  }
+
+  .phase:last-child .phase-connector { display: none; }
+
+  .phase-content {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 20px;
+    margin: 12px 0 20px;
+    transition: border-color 0.2s;
+  }
+
+  .phase-content:hover {
+    border-color: rgba(0,229,255,0.2);
+  }
+
+  .phase-name {
+    font-family: 'Syne', sans-serif;
+    font-weight: 700;
+    color: #fff;
+    margin-bottom: 10px;
+    font-size: 14px;
+  }
+
+  .phase-tasks {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .phase-tasks li {
+    font-size: 12.5px;
+    color: var(--muted);
+    padding-left: 16px;
+    position: relative;
+  }
+
+  .phase-tasks li::before {
+    content: '→';
+    position: absolute;
+    left: 0;
+    color: var(--accent);
+    font-size: 11px;
+  }
+
+  /* ── Stack table ── */
+  .stack-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 12px;
+  }
+
+  .stack-item {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 16px;
+    transition: border-color 0.2s, transform 0.2s;
+  }
+
+  .stack-item:hover {
+    border-color: rgba(124,58,237,0.4);
+    transform: translateY(-2px);
+  }
+
+  .stack-role {
+    font-size: 10px;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 6px;
+  }
+
+  .stack-name {
+    font-family: 'Syne', sans-serif;
+    font-weight: 700;
+    color: #fff;
+    font-size: 14px;
+  }
+
+  .stack-detail {
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 4px;
+  }
+
+  /* ── Architecture diagram ── */
+  .arch-flow {
+    display: flex;
+    align-items: center;
+    gap: 0;
+    overflow-x: auto;
+    padding: 8px 0;
+    flex-wrap: nowrap;
+  }
+
+  .arch-block {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 16px 20px;
+    text-align: center;
+    flex-shrink: 0;
+    min-width: 120px;
+    transition: border-color 0.2s;
+  }
+
+  .arch-block:hover { border-color: var(--accent); }
+
+  .arch-block.encoder { border-color: rgba(0,229,255,0.3); }
+  .arch-block.decoder { border-color: rgba(124,58,237,0.3); }
+  .arch-block.output  { border-color: rgba(245,158,11,0.3); }
+
+  .arch-icon {
+    font-size: 22px;
+    margin-bottom: 6px;
+  }
+
+  .arch-label {
+    font-family: 'Syne', sans-serif;
+    font-weight: 700;
+    font-size: 11px;
+    color: #fff;
+    letter-spacing: 0.05em;
+  }
+
+  .arch-sub {
+    font-size: 10px;
+    color: var(--muted);
+    margin-top: 3px;
+  }
+
+  .arch-arrow {
+    font-size: 18px;
+    color: var(--muted);
+    padding: 0 10px;
+    flex-shrink: 0;
+  }
+
+  /* ── Dataset card ── */
+  .dataset-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 16px;
+  }
+
+  @media (max-width: 600px) {
+    .dataset-grid { grid-template-columns: 1fr; }
+    .arch-flow { flex-direction: column; gap: 8px; }
+    .arch-arrow { transform: rotate(90deg); }
+  }
+
+  .dataset-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 20px;
+    transition: border-color 0.2s;
+  }
+
+  .dataset-card:hover { border-color: rgba(245,158,11,0.3); }
+
+  .dataset-name {
+    font-family: 'Syne', sans-serif;
+    font-weight: 700;
+    color: var(--accent3);
+    font-size: 15px;
+    margin-bottom: 8px;
+  }
+
+  .dataset-stat {
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+    padding: 4px 0;
+    border-bottom: 1px solid var(--border);
+    color: var(--muted);
+  }
+
+  .dataset-stat span:last-child { color: var(--text); }
+
+  /* ── Deliverables ── */
+  .deliverables {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 12px;
+  }
+
+  .deliverable {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 16px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .deliverable-icon { font-size: 20px; }
+
+  .deliverable-name {
+    font-family: 'Syne', sans-serif;
+    font-weight: 700;
+    font-size: 13px;
+    color: #fff;
+  }
+
+  .deliverable-desc {
+    font-size: 11px;
+    color: var(--muted);
+    line-height: 1.6;
+  }
+
+  /* ── Code block ── */
+  .code-block {
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-left: 3px solid var(--accent2);
+    border-radius: 4px;
+    padding: 20px;
+    font-size: 12px;
+    color: #94a3b8;
+    overflow-x: auto;
+    line-height: 1.9;
+  }
+
+  .code-block .comment { color: #475569; }
+  .code-block .key { color: var(--accent); }
+  .code-block .val { color: #a78bfa; }
+  .code-block .str { color: var(--accent3); }
+
+  /* ── Compliance box ── */
+  .compliance {
+    background: rgba(0,229,255,0.04);
+    border: 1px solid rgba(0,229,255,0.15);
+    border-radius: 6px;
+    padding: 24px;
+  }
+
+  .compliance-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 14px;
+    padding: 10px 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+  }
+
+  .compliance-row:last-child { border-bottom: none; }
+
+  .check { color: #4ade80; font-size: 16px; flex-shrink: 0; }
+  .compliance-rule { color: var(--muted); }
+  .compliance-rule strong { color: var(--text); display: block; margin-bottom: 2px; }
+
+  /* ── Footer ── */
+  .footer {
+    margin-top: 80px;
+    padding-top: 24px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px;
+  }
+
+  .footer-label {
+    font-size: 11px;
+    color: var(--muted);
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+  }
+
+  .footer-project {
+    font-family: 'Syne', sans-serif;
+    font-weight: 700;
+    font-size: 13px;
+    color: var(--accent);
+  }
+
+  @keyframes fadeUp {
+    from { opacity: 0; transform: translateY(20px); }
+    to   { opacity: 1; transform: translateY(0); }
+  }
+</style>
+</head>
+<body>
+<div class="wrapper">
+
+  <!-- Header -->
+  <div class="header">
+    <div class="label">// Mini Project — Implementation Plan</div>
+    <h1>Receipt OCR<br>with <span>TrOCR</span></h1>
+    <p class="subtitle">
+      A Transformer-based scene text recognition system fine-tuned on receipt images —
+      serving as the deep learning foundation for the Quantix smart stock management pipeline.
+    </p>
+    <div class="meta-row">
+      <span class="meta-tag">Transformer</span>
+      <span class="meta-tag purple">Vision + Text</span>
+      <span class="meta-tag amber">Image → Text</span>
+      <span class="meta-tag">Gradio Deploy</span>
+    </div>
+  </div>
+
+  <!-- 1. Compliance Check -->
+  <div class="section">
+    <div class="section-header">
+      <span class="section-num">01</span>
+      <span class="section-title">Requirement Compliance</span>
+      <div class="divider"></div>
+    </div>
+    <div class="compliance">
+      <div class="compliance-row">
+        <span class="check">✓</span>
+        <div class="compliance-rule">
+          <strong>DL Network Type</strong>
+          TrOCR = ViT encoder + BEiT/RoBERTa decoder — a Transformer variant. Fully covered.
+        </div>
+      </div>
+      <div class="compliance-row">
+        <span class="check">✓</span>
+        <div class="compliance-rule">
+          <strong>Main Data ≠ Text</strong>
+          Input is an image (receipt scan/photo). Text is only the output label, not the data being modeled.
+        </div>
+      </div>
+      <div class="compliance-row">
+        <span class="check">✓</span>
+        <div class="compliance-rule">
+          <strong>Deployment</strong>
+          Gradio web app — user uploads image, model returns extracted text. Live shareable link.
+        </div>
+      </div>
+      <div class="compliance-row">
+        <span class="check">✓</span>
+        <div class="compliance-rule">
+          <strong>Report</strong>
+          Architecture detail, datasets, code walkthrough, results (CER/WER), discussion, conclusion.
+        </div>
+      </div>
+      <div class="compliance-row">
+        <span class="check">✓</span>
+        <div class="compliance-rule">
+          <strong>Code on GitHub</strong>
+          Repo with training script, inference script, Gradio app, and requirements.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 2. Architecture -->
+  <div class="section">
+    <div class="section-header">
+      <span class="section-num">02</span>
+      <span class="section-title">Model Architecture — TrOCR</span>
+      <div class="divider"></div>
+    </div>
+
+    <div class="arch-flow">
+      <div class="arch-block">
+        <div class="arch-icon">🖼️</div>
+        <div class="arch-label">INPUT</div>
+        <div class="arch-sub">Receipt image<br>224×224 px</div>
+      </div>
+      <div class="arch-arrow">→</div>
+      <div class="arch-block encoder">
+        <div class="arch-icon">🔷</div>
+        <div class="arch-label">ViT ENCODER</div>
+        <div class="arch-sub">Patch embedding<br>16×16 patches<br>Vision Transformer</div>
+      </div>
+      <div class="arch-arrow">→</div>
+      <div class="arch-block decoder">
+        <div class="arch-icon">🔮</div>
+        <div class="arch-label">DECODER</div>
+        <div class="arch-sub">RoBERTa-based<br>Auto-regressive<br>Text generation</div>
+      </div>
+      <div class="arch-arrow">→</div>
+      <div class="arch-block output">
+        <div class="arch-icon">📝</div>
+        <div class="arch-label">OUTPUT</div>
+        <div class="arch-sub">Extracted text<br>from receipt</div>
+      </div>
+    </div>
+
+    <div style="margin-top:20px;">
+      <div class="card">
+        <div class="card-title">Pretrained Checkpoint</div>
+        <p><span class="highlight">microsoft/trocr-base-printed</span> — pretrained on 684M text line images (synthetic + real). We fine-tune only on SROIE receipt data to adapt to the receipt domain.</p>
+      </div>
+      <div class="card">
+        <div class="card-title">Why TrOCR?</div>
+        <p>End-to-end Transformer (no CNN backbone, no CTC decoder). Both encoder and decoder are Transformers. Strong SOTA results on IAM and SROIE. Well-supported via HuggingFace — easy to fine-tune and deploy.</p>
+      </div>
+    </div>
+  </div>
+
+  <!-- 3. Datasets -->
+  <div class="section">
+    <div class="section-header">
+      <span class="section-num">03</span>
+      <span class="section-title">Datasets</span>
+      <div class="divider"></div>
+    </div>
+    <div class="dataset-grid">
+      <div class="dataset-card">
+        <div class="dataset-name">SROIE 2019</div>
+        <div class="dataset-stat"><span>Purpose</span><span>Primary (fine-tune)</span></div>
+        <div class="dataset-stat"><span>Samples</span><span>973 receipt images</span></div>
+        <div class="dataset-stat"><span>Labels</span><span>Word-level bounding boxes + text</span></div>
+        <div class="dataset-stat"><span>Source</span><span>ICDAR 2019 competition</span></div>
+        <div class="dataset-stat"><span>Type</span><span>Scanned printed receipts</span></div>
+      </div>
+      <div class="dataset-card">
+        <div class="dataset-name">IAM Handwriting DB</div>
+        <div class="dataset-stat"><span>Purpose</span><span>Secondary (optional)</span></div>
+        <div class="dataset-stat"><span>Samples</span><span>13,353 text lines</span></div>
+        <div class="dataset-stat"><span>Labels</span><span>Line-level transcriptions</span></div>
+        <div class="dataset-stat"><span>Source</span><span>University of Bern</span></div>
+        <div class="dataset-stat"><span>Type</span><span>Handwritten English text</span></div>
+      </div>
+    </div>
+    <div class="card" style="margin-top:16px;">
+      <div class="card-title">Data Preprocessing Pipeline</div>
+      <p>Crop individual text line images from receipts using bounding box annotations → Resize to 384×384 → Normalize with ViT preprocessing → tokenize ground truth with TrOCR tokenizer → split 80/10/10 train/val/test.</p>
+    </div>
+  </div>
+
+  <!-- 4. Tech Stack -->
+  <div class="section">
+    <div class="section-header">
+      <span class="section-num">04</span>
+      <span class="section-title">Technology Stack</span>
+      <div class="divider"></div>
+    </div>
+    <div class="stack-grid">
+      <div class="stack-item">
+        <div class="stack-role">Platform</div>
+        <div class="stack-name">Google Colab</div>
+        <div class="stack-detail">T4 GPU, free tier sufficient</div>
+      </div>
+      <div class="stack-item">
+        <div class="stack-role">Framework</div>
+        <div class="stack-name">PyTorch</div>
+        <div class="stack-detail">Training + inference</div>
+      </div>
+      <div class="stack-item">
+        <div class="stack-role">Model Hub</div>
+        <div class="stack-name">HuggingFace</div>
+        <div class="stack-detail">transformers + datasets</div>
+      </div>
+      <div class="stack-item">
+        <div class="stack-role">Deployment</div>
+        <div class="stack-name">Gradio</div>
+        <div class="stack-detail">Web UI + shareable link</div>
+      </div>
+      <div class="stack-item">
+        <div class="stack-role">Evaluation</div>
+        <div class="stack-name">jiwer / editdistance</div>
+        <div class="stack-detail">CER & WER metrics</div>
+      </div>
+      <div class="stack-item">
+        <div class="stack-role">Tracking</div>
+        <div class="stack-name">WandB</div>
+        <div class="stack-detail">Loss & metric curves</div>
+      </div>
+      <div class="stack-item">
+        <div class="stack-role">Version Control</div>
+        <div class="stack-name">GitHub</div>
+        <div class="stack-detail">Code + model card</div>
+      </div>
+      <div class="stack-item">
+        <div class="stack-role">Report</div>
+        <div class="stack-name">LaTeX / Word</div>
+        <div class="stack-detail">PDF submission</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 5. Timeline -->
+  <div class="section">
+    <div class="section-header">
+      <span class="section-num">05</span>
+      <span class="section-title">Implementation Timeline</span>
+      <div class="divider"></div>
+    </div>
+    <div class="phases">
+      <div class="phase">
+        <div class="phase-label">
+          <div class="week">Week 1</div>
+          <div class="duration">Days 1–7</div>
+        </div>
+        <div class="phase-line">
+          <div class="phase-dot"></div>
+          <div class="phase-connector"></div>
+        </div>
+        <div class="phase-content">
+          <div class="phase-name">Setup & Data Preparation</div>
+          <ul class="phase-tasks">
+            <li>Set up Colab environment, install dependencies</li>
+            <li>Download SROIE dataset, explore structure</li>
+            <li>Parse bounding box annotations, crop text line images</li>
+            <li>Build preprocessing pipeline + HuggingFace Dataset object</li>
+            <li>Verify samples visually, check label alignment</li>
+          </ul>
+        </div>
+      </div>
+      <div class="phase">
+        <div class="phase-label">
+          <div class="week">Week 2</div>
+          <div class="duration">Days 8–14</div>
+        </div>
+        <div class="phase-line">
+          <div class="phase-dot"></div>
+          <div class="phase-connector"></div>
+        </div>
+        <div class="phase-content">
+          <div class="phase-name">Fine-Tuning</div>
+          <ul class="phase-tasks">
+            <li>Load microsoft/trocr-base-printed checkpoint</li>
+            <li>Configure Seq2SeqTrainer with CER as metric</li>
+            <li>Fine-tune for 10–15 epochs on SROIE train split</li>
+            <li>Monitor training with WandB — loss, CER, WER</li>
+            <li>Save best checkpoint, run on validation set</li>
+          </ul>
+        </div>
+      </div>
+      <div class="phase">
+        <div class="phase-label">
+          <div class="week">Week 3</div>
+          <div class="duration">Days 15–21</div>
+        </div>
+        <div class="phase-line">
+          <div class="phase-dot"></div>
+          <div class="phase-connector"></div>
+        </div>
+        <div class="phase-content">
+          <div class="phase-name">Evaluation & Deployment</div>
+          <ul class="phase-tasks">
+            <li>Evaluate on SROIE test set — report CER / WER</li>
+            <li>Compare fine-tuned vs base (zero-shot) performance</li>
+            <li>Build Gradio app: image upload → text output</li>
+            <li>Test with real receipt photos (phone camera)</li>
+            <li>Push model to HuggingFace Hub, publish Gradio Space</li>
+          </ul>
+        </div>
+      </div>
+      <div class="phase">
+        <div class="phase-label">
+          <div class="week">Week 4</div>
+          <div class="duration">Days 22–28</div>
+        </div>
+        <div class="phase-line">
+          <div class="phase-dot"></div>
+          <div class="phase-connector"></div>
+        </div>
+        <div class="phase-content">
+          <div class="phase-name">Report & Submission</div>
+          <ul class="phase-tasks">
+            <li>Write report: architecture, dataset, training details</li>
+            <li>Add results tables, training curves, visual examples</li>
+            <li>Discussion: error analysis, failure cases, limitations</li>
+            <li>Conclusion + Quantix integration roadmap</li>
+            <li>Push final code to GitHub, submit PDF to Moodle</li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 6. Training Config -->
+  <div class="section">
+    <div class="section-header">
+      <span class="section-num">06</span>
+      <span class="section-title">Training Configuration</span>
+      <div class="divider"></div>
+    </div>
+    <div class="code-block">
+<span class="comment"># Fine-tuning hyperparameters</span>
+<span class="key">model</span>       = <span class="str">"microsoft/trocr-base-printed"</span>
+<span class="key">epochs</span>      = <span class="val">15</span>
+<span class="key">batch_size</span>  = <span class="val">8</span>            <span class="comment"># Colab T4 safe</span>
+<span class="key">lr</span>          = <span class="val">5e-5</span>         <span class="comment"># AdamW optimizer</span>
+<span class="key">scheduler</span>   = <span class="str">"linear warmup"</span>
+<span class="key">warmup_steps</span>= <span class="val">500</span>
+<span class="key">max_length</span>  = <span class="val">128</span>          <span class="comment"># max token output</span>
+<span class="key">metric</span>      = <span class="str">"CER"</span>         <span class="comment"># Character Error Rate</span>
+<span class="key">save_strategy</span>= <span class="str">"epoch"</span>
+<span class="key">load_best</span>   = <span class="val">True</span>
+<span class="comment">
+# Expected results (SROIE benchmark)
+# Zero-shot CER  ≈ 8–12%
+# Fine-tuned CER ≈ 2–5%</span>
+    </div>
+  </div>
+
+  <!-- 7. Evaluation Metrics -->
+  <div class="section">
+    <div class="section-header">
+      <span class="section-num">07</span>
+      <span class="section-title">Evaluation Metrics</span>
+      <div class="divider"></div>
+    </div>
+    <div class="card">
+      <div class="card-title">CER — Character Error Rate</div>
+      <p>Primary metric. Measures edit distance at character level normalized by length. <span class="highlight">Lower is better.</span> Particularly important for receipts where digit errors (e.g. price 12.50 → 12.80) are costly.</p>
+    </div>
+    <div class="card">
+      <div class="card-title">WER — Word Error Rate</div>
+      <p>Secondary metric. Same principle at word level. Useful for evaluating readability of full receipt lines (store names, item descriptions).</p>
+    </div>
+    <div class="card">
+      <div class="card-title">Qualitative Analysis</div>
+      <p>Visual comparison of predicted vs ground truth on 10 sample receipts. Identify failure cases: low contrast, cursive fonts, stamps, damaged areas. Important for the report discussion section.</p>
+    </div>
+  </div>
+
+  <!-- 8. Deliverables -->
+  <div class="section">
+    <div class="section-header">
+      <span class="section-num">08</span>
+      <span class="section-title">Deliverables</span>
+      <div class="divider"></div>
+    </div>
+    <div class="deliverables">
+      <div class="deliverable">
+        <div class="deliverable-icon">🗂️</div>
+        <div class="deliverable-name">GitHub Repo</div>
+        <div class="deliverable-desc">Training script, inference, Gradio app, requirements.txt, README</div>
+      </div>
+      <div class="deliverable">
+        <div class="deliverable-icon">🌐</div>
+        <div class="deliverable-name">Gradio App</div>
+        <div class="deliverable-desc">Live web demo — upload receipt image, get extracted text</div>
+      </div>
+      <div class="deliverable">
+        <div class="deliverable-icon">🤗</div>
+        <div class="deliverable-name">HF Model</div>
+        <div class="deliverable-desc">Fine-tuned checkpoint pushed to HuggingFace Hub</div>
+      </div>
+      <div class="deliverable">
+        <div class="deliverable-icon">📄</div>
+        <div class="deliverable-name">Report PDF</div>
+        <div class="deliverable-desc">Architecture, dataset, training, results, discussion, conclusion</div>
+      </div>
+      <div class="deliverable">
+        <div class="deliverable-icon">📊</div>
+        <div class="deliverable-name">WandB Report</div>
+        <div class="deliverable-desc">Training curves, CER/WER evolution, experiment logs</div>
+      </div>
+      <div class="deliverable">
+        <div class="deliverable-icon">🔗</div>
+        <div class="deliverable-name">Quantix Bridge</div>
+        <div class="deliverable-desc">Section in report on how this feeds into the real pipeline</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <div class="footer">
+    <div>
+      <div class="footer-label">Mini Project</div>
+      <div class="footer-project">Receipt OCR with TrOCR</div>
+    </div>
+    <div style="text-align:right;">
+      <div class="footer-label">Related Project</div>
+      <div class="footer-project">Quantix — Smart Stock Management</div>
+    </div>
+  </div>
+
+</div>
+</body>
+</html>
