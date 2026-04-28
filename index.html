@@ -1,0 +1,826 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Receipt OCR — Quantix</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Libre+Baskerville:ital,wght@0,400;0,700;1,400&family=IBM+Plex+Mono:wght@300;400;500&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+<style>
+/* ── Reset & Variables ─────────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --cream:    #f5f0e8;
+  --paper:    #faf8f3;
+  --ink:      #1a1a18;
+  --ink-mid:  #3d3d38;
+  --ink-lite: #7a7a72;
+  --rule:     #d8d2c4;
+  --accent:   #1a3a2a;
+  --accent-l: #2d5c42;
+  --red:      #8b2020;
+  --gold:     #b8860b;
+  --mono:     'IBM Plex Mono', monospace;
+  --sans:     'IBM Plex Sans', sans-serif;
+  --serif:    'Libre Baskerville', serif;
+}
+
+html { font-size: 15px; }
+
+body {
+  background: var(--cream);
+  color: var(--ink);
+  font-family: var(--sans);
+  min-height: 100vh;
+  line-height: 1.6;
+}
+
+/* ── Grain overlay ─────────────────────────────────────────────────────────── */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E");
+  pointer-events: none;
+  z-index: 0;
+  opacity: 0.6;
+}
+
+/* ── Layout ────────────────────────────────────────────────────────────────── */
+.page { position: relative; z-index: 1; max-width: 1160px; margin: 0 auto; padding: 0 32px 80px; }
+
+/* ── Header ────────────────────────────────────────────────────────────────── */
+header {
+  border-bottom: 2px solid var(--ink);
+  padding: 28px 0 20px;
+  margin-bottom: 48px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.header-left { display: flex; align-items: flex-end; gap: 20px; }
+
+.logo-mark {
+  width: 48px; height: 48px;
+  border: 2px solid var(--ink);
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--serif);
+  font-size: 22px;
+  font-style: italic;
+  background: var(--ink);
+  color: var(--cream);
+  flex-shrink: 0;
+}
+
+.site-title {
+  font-family: var(--serif);
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: -0.5px;
+  line-height: 1;
+}
+
+.site-subtitle {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-lite);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  margin-top: 4px;
+}
+
+.header-right {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-lite);
+  text-align: right;
+  line-height: 1.8;
+}
+
+.header-right strong {
+  color: var(--accent);
+  font-weight: 500;
+}
+
+/* ── Main grid ─────────────────────────────────────────────────────────────── */
+.main-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 40px;
+  align-items: start;
+}
+
+@media (max-width: 800px) {
+  .main-grid { grid-template-columns: 1fr; }
+}
+
+/* ── Section heading ───────────────────────────────────────────────────────── */
+.section-label {
+  font-family: var(--mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-lite);
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.section-label::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--rule);
+}
+
+/* ── Upload zone ───────────────────────────────────────────────────────────── */
+.upload-panel {
+  border: 1px solid var(--rule);
+  background: var(--paper);
+}
+
+.drop-zone {
+  border: 2px dashed var(--rule);
+  margin: 20px;
+  padding: 40px 20px;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 0.2s, background 0.2s;
+  position: relative;
+}
+
+.drop-zone:hover, .drop-zone.drag-over {
+  border-color: var(--accent);
+  background: rgba(26,58,42,0.03);
+}
+
+.drop-zone input[type=file] {
+  position: absolute; inset: 0;
+  opacity: 0; cursor: pointer; width: 100%; height: 100%;
+}
+
+.drop-icon {
+  font-size: 32px;
+  margin-bottom: 12px;
+  display: block;
+  color: var(--ink-lite);
+}
+
+.drop-text {
+  font-family: var(--serif);
+  font-size: 16px;
+  color: var(--ink-mid);
+  margin-bottom: 6px;
+}
+
+.drop-hint {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-lite);
+}
+
+/* preview */
+.preview-wrap {
+  margin: 0 20px 20px;
+  display: none;
+  position: relative;
+}
+
+.preview-wrap img {
+  width: 100%;
+  max-height: 320px;
+  object-fit: contain;
+  border: 1px solid var(--rule);
+  background: white;
+  display: block;
+}
+
+.preview-clear {
+  position: absolute; top: 8px; right: 8px;
+  background: var(--ink);
+  color: var(--cream);
+  border: none; cursor: pointer;
+  width: 28px; height: 28px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14px;
+  font-family: var(--mono);
+  transition: background 0.15s;
+}
+
+.preview-clear:hover { background: var(--red); }
+
+/* settings */
+.settings-section {
+  border-top: 1px solid var(--rule);
+  padding: 16px 20px;
+}
+
+.settings-toggle {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-lite);
+  background: none; border: none;
+  cursor: pointer;
+  display: flex; align-items: center; gap: 8px;
+  padding: 0;
+  width: 100%;
+  text-align: left;
+}
+
+.settings-toggle .chevron {
+  transition: transform 0.2s;
+  font-style: normal;
+}
+
+.settings-toggle.open .chevron { transform: rotate(180deg); }
+
+.settings-body {
+  display: none;
+  padding-top: 16px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+.field label {
+  display: block;
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--ink-lite);
+  margin-bottom: 4px;
+}
+
+.field input[type=number] {
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid var(--rule);
+  background: var(--cream);
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--ink);
+  outline: none;
+  transition: border-color 0.2s;
+}
+
+.field input[type=number]:focus { border-color: var(--accent); }
+
+/* submit */
+.submit-wrap {
+  border-top: 1px solid var(--rule);
+  padding: 16px 20px;
+}
+
+.btn-extract {
+  width: 100%;
+  padding: 14px;
+  background: var(--ink);
+  color: var(--cream);
+  border: none;
+  font-family: var(--serif);
+  font-size: 16px;
+  font-style: italic;
+  letter-spacing: 0.03em;
+  cursor: pointer;
+  transition: background 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+
+.btn-extract:hover { background: var(--accent); }
+.btn-extract:disabled { background: var(--ink-lite); cursor: not-allowed; }
+
+.btn-extract .spinner {
+  width: 16px; height: 16px;
+  border: 2px solid rgba(245,240,232,0.3);
+  border-top-color: var(--cream);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  display: none;
+}
+
+.btn-extract.loading .spinner { display: block; }
+.btn-extract.loading .btn-text { opacity: 0.7; }
+
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── Results panel ─────────────────────────────────────────────────────────── */
+.results-panel { display: flex; flex-direction: column; gap: 24px; }
+
+/* annotated image */
+.annotated-wrap {
+  border: 1px solid var(--rule);
+  background: var(--paper);
+  overflow: hidden;
+}
+
+.annotated-wrap img {
+  width: 100%;
+  max-height: 360px;
+  object-fit: contain;
+  background: white;
+  display: block;
+}
+
+.annotated-placeholder {
+  height: 200px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink-lite);
+  letter-spacing: 0.05em;
+}
+
+/* stats bar */
+.stats-bar {
+  display: flex;
+  gap: 0;
+  border: 1px solid var(--rule);
+  background: var(--paper);
+  overflow: hidden;
+}
+
+.stat-item {
+  flex: 1;
+  padding: 12px 14px;
+  border-right: 1px solid var(--rule);
+  text-align: center;
+}
+
+.stat-item:last-child { border-right: none; }
+
+.stat-value {
+  font-family: var(--serif);
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--accent);
+  line-height: 1;
+  margin-bottom: 3px;
+}
+
+.stat-label {
+  font-family: var(--mono);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-lite);
+}
+
+/* text output */
+.text-output-wrap {
+  border: 1px solid var(--rule);
+  background: var(--paper);
+}
+
+.text-output-head {
+  border-bottom: 1px solid var(--rule);
+  padding: 10px 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.text-output-head span {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-lite);
+}
+
+.copy-btn {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  background: none;
+  border: 1px solid var(--rule);
+  color: var(--ink-lite);
+  padding: 4px 10px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.copy-btn:hover { border-color: var(--accent); color: var(--accent); }
+.copy-btn.copied { border-color: var(--accent-l); color: var(--accent-l); }
+
+.text-output-body {
+  padding: 16px;
+  min-height: 160px;
+  max-height: 360px;
+  overflow-y: auto;
+}
+
+.line-item {
+  display: flex;
+  gap: 12px;
+  padding: 5px 0;
+  border-bottom: 1px solid rgba(216,210,196,0.4);
+  animation: fadeIn 0.3s ease both;
+}
+
+.line-item:last-child { border-bottom: none; }
+
+.line-num {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--ink-lite);
+  min-width: 28px;
+  padding-top: 1px;
+  flex-shrink: 0;
+}
+
+.line-text {
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--ink);
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.line-text.conf-low { color: var(--red); }
+.line-text.conf-medium { color: var(--gold); }
+
+.text-empty {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--ink-lite);
+  text-align: center;
+  padding: 40px 0;
+  letter-spacing: 0.05em;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* ── Error toast ───────────────────────────────────────────────────────────── */
+.toast {
+  position: fixed;
+  bottom: 32px; right: 32px;
+  background: var(--red);
+  color: white;
+  padding: 12px 20px;
+  font-family: var(--mono);
+  font-size: 12px;
+  z-index: 100;
+  transform: translateY(80px);
+  opacity: 0;
+  transition: all 0.3s;
+}
+
+.toast.show { transform: translateY(0); opacity: 1; }
+
+/* ── Footer ────────────────────────────────────────────────────────────────── */
+footer {
+  border-top: 1px solid var(--rule);
+  margin-top: 60px;
+  padding-top: 20px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+footer p {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--ink-lite);
+  letter-spacing: 0.08em;
+}
+
+.model-badge {
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--accent);
+  border: 1px solid var(--accent);
+  padding: 3px 10px;
+  letter-spacing: 0.08em;
+}
+</style>
+</head>
+<body>
+<div class="page">
+
+  <!-- Header -->
+  <header>
+    <div class="header-left">
+      <div class="logo-mark">Q</div>
+      <div>
+        <div class="site-title">Receipt OCR</div>
+        <div class="site-subtitle">Quantix · Document Intelligence</div>
+      </div>
+    </div>
+    <div class="header-right">
+      <div>Model &nbsp;<strong>TrOCR-base-printed</strong></div>
+      <div>Fine-tuned on &nbsp;<strong>SROIE 2019</strong></div>
+      <div>Test CER &nbsp;<strong>1.18%</strong></div>
+    </div>
+  </header>
+
+  <!-- Main grid -->
+  <div class="main-grid">
+
+    <!-- LEFT: Upload + Controls -->
+    <div class="upload-panel">
+      <div style="padding: 20px 20px 0;">
+        <div class="section-label">Input</div>
+      </div>
+
+      <!-- Drop zone -->
+      <div class="drop-zone" id="dropZone">
+        <input type="file" id="fileInput" accept="image/*">
+        <span class="drop-icon">⬡</span>
+        <div class="drop-text">Drop receipt image here</div>
+        <div class="drop-hint">or click to browse &nbsp;·&nbsp; JPG, PNG, WEBP</div>
+      </div>
+
+      <!-- Preview -->
+      <div class="preview-wrap" id="previewWrap">
+        <img id="previewImg" src="" alt="Receipt preview">
+        <button class="preview-clear" id="clearBtn" title="Remove image">✕</button>
+      </div>
+
+      <!-- Settings -->
+      <div class="settings-section">
+        <button class="settings-toggle" id="settingsToggle">
+          <span>Detection Settings</span>
+          <em class="chevron">▾</em>
+        </button>
+        <div class="settings-body" id="settingsBody">
+          <div class="field">
+            <label>Max Width (px)</label>
+            <input type="number" id="maxWidth" value="1200" min="400" max="2000" step="100">
+          </div>
+          <div class="field">
+            <label>Min Band Height</label>
+            <input type="number" id="minBandH" value="10" min="5" max="60">
+          </div>
+          <div class="field">
+            <label>Merge Gap (px)</label>
+            <input type="number" id="mergeGap" value="8" min="2" max="40">
+          </div>
+        </div>
+      </div>
+
+      <!-- Submit -->
+      <div class="submit-wrap">
+        <button class="btn-extract" id="extractBtn" disabled>
+          <div class="spinner"></div>
+          <span class="btn-text">Extract Text from Receipt</span>
+        </button>
+      </div>
+    </div>
+
+    <!-- RIGHT: Results -->
+    <div class="results-panel">
+
+      <!-- Annotated image -->
+      <div>
+        <div class="section-label">Annotated Output</div>
+        <div class="annotated-wrap">
+          <div class="annotated-placeholder" id="annotatedPlaceholder">
+            Upload a receipt to see annotated results
+          </div>
+          <img id="annotatedImg" src="" alt="Annotated receipt" style="display:none;">
+        </div>
+      </div>
+
+      <!-- Stats -->
+      <div class="stats-bar">
+        <div class="stat-item">
+          <div class="stat-value" id="statLines">—</div>
+          <div class="stat-label">Lines Detected</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-value" id="statSize">—</div>
+          <div class="stat-label">Image Size</div>
+        </div>
+        <div class="stat-item">
+          <div class="stat-value" id="statDevice">—</div>
+          <div class="stat-label">Compute</div>
+        </div>
+      </div>
+
+      <!-- Text output -->
+      <div>
+        <div class="section-label">Extracted Text</div>
+        <div class="text-output-wrap">
+          <div class="text-output-head">
+            <span>Line-by-line transcription</span>
+            <button class="copy-btn" id="copyBtn">Copy All</button>
+          </div>
+          <div class="text-output-body" id="textOutputBody">
+            <div class="text-empty" id="textEmpty">No results yet</div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <footer>
+    <p>QUANTIX RECEIPT SCANNER &nbsp;·&nbsp; PROTOTYPE v2.0 &nbsp;·&nbsp; LOCAL INFERENCE</p>
+    <div class="model-badge">TrOCR · SROIE · CER 1.18%</div>
+  </footer>
+
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<script>
+const API = 'http://localhost:8000';
+
+// ── Elements ────────────────────────────────────────────────────────────────
+const fileInput      = document.getElementById('fileInput');
+const dropZone       = document.getElementById('dropZone');
+const previewWrap    = document.getElementById('previewWrap');
+const previewImg     = document.getElementById('previewImg');
+const clearBtn       = document.getElementById('clearBtn');
+const extractBtn     = document.getElementById('extractBtn');
+const annotatedImg   = document.getElementById('annotatedImg');
+const annotatedPH    = document.getElementById('annotatedPlaceholder');
+const textBody       = document.getElementById('textOutputBody');
+const textEmpty      = document.getElementById('textEmpty');
+const copyBtn        = document.getElementById('copyBtn');
+const statLines      = document.getElementById('statLines');
+const statSize       = document.getElementById('statSize');
+const statDevice     = document.getElementById('statDevice');
+const toast          = document.getElementById('toast');
+const settingsToggle = document.getElementById('settingsToggle');
+const settingsBody   = document.getElementById('settingsBody');
+
+let currentFile  = null;
+let currentText  = '';
+let settingsOpen = false;
+
+// ── Settings toggle ──────────────────────────────────────────────────────────
+settingsToggle.addEventListener('click', () => {
+  settingsOpen = !settingsOpen;
+  settingsBody.style.display = settingsOpen ? 'grid' : 'none';
+  settingsToggle.classList.toggle('open', settingsOpen);
+});
+settingsBody.style.display = 'none';
+
+// ── File handling ────────────────────────────────────────────────────────────
+function setFile(file) {
+  if (!file || !file.type.startsWith('image/')) {
+    showToast('Please select an image file.');
+    return;
+  }
+  currentFile = file;
+  const url   = URL.createObjectURL(file);
+  previewImg.src    = url;
+  previewWrap.style.display = 'block';
+  dropZone.style.display    = 'none';
+  extractBtn.disabled = false;
+}
+
+fileInput.addEventListener('change', e => {
+  if (e.target.files[0]) setFile(e.target.files[0]);
+});
+
+dropZone.addEventListener('dragover', e => {
+  e.preventDefault();
+  dropZone.classList.add('drag-over');
+});
+dropZone.addEventListener('dragleave', () => dropZone.classList.remove('drag-over'));
+dropZone.addEventListener('drop', e => {
+  e.preventDefault();
+  dropZone.classList.remove('drag-over');
+  if (e.dataTransfer.files[0]) setFile(e.dataTransfer.files[0]);
+});
+
+clearBtn.addEventListener('click', () => {
+  currentFile = null;
+  previewImg.src = '';
+  previewWrap.style.display = 'none';
+  dropZone.style.display    = 'block';
+  extractBtn.disabled = true;
+  fileInput.value = '';
+  resetResults();
+});
+
+// ── Extract ──────────────────────────────────────────────────────────────────
+extractBtn.addEventListener('click', async () => {
+  if (!currentFile) return;
+
+  extractBtn.disabled = true;
+  extractBtn.classList.add('loading');
+  extractBtn.querySelector('.btn-text').textContent = 'Processing…';
+
+  try {
+    const fd = new FormData();
+    fd.append('file', currentFile);
+    fd.append('max_width',       document.getElementById('maxWidth').value);
+    fd.append('min_band_height', document.getElementById('minBandH').value);
+    fd.append('merge_gap',       document.getElementById('mergeGap').value);
+
+    const res  = await fetch(`${API}/ocr`, { method: 'POST', body: fd });
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.detail || 'Server error');
+    }
+    const data = await res.json();
+    renderResults(data);
+
+  } catch (err) {
+    showToast(err.message || 'Failed to connect to OCR server.');
+  } finally {
+    extractBtn.disabled = false;
+    extractBtn.classList.remove('loading');
+    extractBtn.querySelector('.btn-text').textContent = 'Extract Text from Receipt';
+  }
+});
+
+// ── Render results ────────────────────────────────────────────────────────────
+function renderResults(data) {
+  // annotated image
+  annotatedPH.style.display = 'none';
+  annotatedImg.style.display = 'block';
+  annotatedImg.src = 'data:image/jpeg;base64,' + data.annotated_image;
+
+  // stats
+  statLines.textContent  = data.total_lines;
+  statSize.textContent   = data.image_size;
+  statDevice.textContent = data.device;
+
+  // text lines
+  currentText = data.full_text;
+  textEmpty.style.display = 'none';
+
+  // remove old lines
+  textBody.querySelectorAll('.line-item').forEach(el => el.remove());
+
+  data.lines.forEach((line, i) => {
+    const div = document.createElement('div');
+    div.className = 'line-item';
+    div.style.animationDelay = `${i * 18}ms`;
+
+    const num  = document.createElement('span');
+    num.className   = 'line-num';
+    num.textContent = String(line.index).padStart(2, '0');
+
+    const txt  = document.createElement('span');
+    txt.className   = `line-text conf-${line.confidence}`;
+    txt.textContent = line.text || '—';
+
+    div.appendChild(num);
+    div.appendChild(txt);
+    textBody.appendChild(div);
+  });
+}
+
+function resetResults() {
+  annotatedPH.style.display = 'flex';
+  annotatedImg.style.display = 'none';
+  annotatedImg.src = '';
+  statLines.textContent  = '—';
+  statSize.textContent   = '—';
+  statDevice.textContent = '—';
+  currentText = '';
+  textBody.querySelectorAll('.line-item').forEach(el => el.remove());
+  textEmpty.style.display = 'block';
+}
+
+// ── Copy ─────────────────────────────────────────────────────────────────────
+copyBtn.addEventListener('click', async () => {
+  if (!currentText) return;
+  try {
+    await navigator.clipboard.writeText(currentText);
+    copyBtn.textContent = 'Copied ✓';
+    copyBtn.classList.add('copied');
+    setTimeout(() => {
+      copyBtn.textContent = 'Copy All';
+      copyBtn.classList.remove('copied');
+    }, 2000);
+  } catch {
+    showToast('Could not copy to clipboard.');
+  }
+});
+
+// ── Toast ─────────────────────────────────────────────────────────────────────
+function showToast(msg) {
+  toast.textContent = msg;
+  toast.classList.add('show');
+  setTimeout(() => toast.classList.remove('show'), 3500);
+}
+</script>
+</body>
+</html>
