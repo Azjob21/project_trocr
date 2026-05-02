@@ -7,4 +7,5 @@ checkpoints/
 wandb/
 .ipynb_checkpoints/
 .gradio/
+.craft_output/
 model/

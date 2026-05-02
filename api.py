@@ -2,37 +2,72 @@ import base64
 import io
 import os
 from pathlib import Path
-from typing import List, Tuple
+from typing import Dict, List, Tuple
 
 import numpy as np
 import torch
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
-from PIL import Image, ImageDraw, ImageFilter, ImageFont, UnidentifiedImageError
+from PIL import Image, ImageDraw, ImageFont, UnidentifiedImageError
 from pydantic import BaseModel
+from transformers import TrOCRProcessor, VisionEncoderDecoderModel
 
 MODEL_PATH = os.getenv("TROCR_MODEL_PATH", "./model")
 PROCESSOR_PATH = os.getenv("TROCR_PROCESSOR_PATH", "microsoft/trocr-base-printed")
 MAX_NEW_TOKENS = int(os.getenv("TROCR_MAX_NEW_TOKENS", "64"))
-DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-MIN_ASPECT = 2.5
+NUM_BEAMS = int(os.getenv("TROCR_NUM_BEAMS", "4"))
 
+CRAFT_TEXT_THRESHOLD = float(os.getenv("CRAFT_TEXT_THRESHOLD", "0.4"))
+CRAFT_LINK_THRESHOLD = float(os.getenv("CRAFT_LINK_THRESHOLD", "0.2"))
+CRAFT_LOW_TEXT = float(os.getenv("CRAFT_LOW_TEXT", "0.3"))
+CRAFT_LONG_SIZE = int(os.getenv("CRAFT_LONG_SIZE", "1600"))
+
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 BASE_DIR = Path(__file__).resolve().parent
 UI_FILE = BASE_DIR / "templates" / "index.html"
+CRAFT_OUTPUT_DIR = BASE_DIR / ".craft_output"
+
+
+def _patch_torchvision_vgg_urls() -> None:
+    import torchvision.models.vgg as vgg
+
+    if not hasattr(vgg, "model_urls"):
+        vgg.model_urls = {
+            "vgg16_bn": "https://download.pytorch.org/models/vgg16_bn-6c64b313.pth"
+        }
+
 
 print(f"[OCR] Loading processor : {PROCESSOR_PATH}")
 print(f"[OCR] Loading model     : {MODEL_PATH}")
 print(f"[OCR] Device            : {DEVICE}")
-
-from transformers import TrOCRProcessor, VisionEncoderDecoderModel
+print(f"[OCR] Beams             : {NUM_BEAMS}")
 
 processor = TrOCRProcessor.from_pretrained(PROCESSOR_PATH)
 model = VisionEncoderDecoderModel.from_pretrained(MODEL_PATH).to(DEVICE)
 model.eval()
-print("[OCR] Model ready.\n")
 
-app = FastAPI(title="Receipt OCR API", version="3.1.0")
+_patch_torchvision_vgg_urls()
+try:
+    from craft_text_detector import Craft
+except ImportError as exc:
+    raise RuntimeError(
+        "Missing dependency 'craft-text-detector'. Run: pip install craft-text-detector --no-deps"
+    ) from exc
+
+craft = Craft(
+    output_dir=str(CRAFT_OUTPUT_DIR),
+    crop_type="box",
+    cuda=torch.cuda.is_available(),
+    text_threshold=CRAFT_TEXT_THRESHOLD,
+    link_threshold=CRAFT_LINK_THRESHOLD,
+    low_text=CRAFT_LOW_TEXT,
+    long_size=CRAFT_LONG_SIZE,
+)
+
+print("[OCR] TrOCR + CRAFT pipeline ready.\n")
+
+app = FastAPI(title="Receipt OCR API", version="4.0.0")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -41,203 +76,156 @@ app.add_middleware(
 )
 
 
-def normalise_receipt(img_pil: Image.Image) -> Image.Image:
-    """
-    Normalize contrast so dark ink stays dark across white/yellow receipts.
-    """
-    gray = img_pil.convert("L")
-    arr = np.array(gray, dtype=np.float32)
-    paper = np.percentile(arr, 95)
-    if paper < 200:
-        arr = arr * (255.0 / max(paper, 1))
-        arr = np.clip(arr, 0, 255)
-        gray = Image.fromarray(arr.astype(np.uint8))
-    return gray
+BBox = Tuple[int, int, int, int]
 
 
-def _bbox_from_mask(mask: np.ndarray, min_density: float = 0.02):
-    row_density = mask.mean(axis=1)
-    col_density = mask.mean(axis=0)
-    ys = np.where(row_density > min_density)[0]
-    xs = np.where(col_density > min_density)[0]
-    if len(xs) == 0 or len(ys) == 0:
-        return None
-    return int(xs[0]), int(ys[0]), int(xs[-1]) + 1, int(ys[-1]) + 1
+def quad_to_bbox(quad: np.ndarray, img_w: int, img_h: int, pad: int = 4) -> BBox:
+    pts = np.asarray(quad, dtype=np.float32)
+    if pts.ndim != 2 or pts.shape[1] < 2:
+        raise ValueError("Invalid quad shape.")
+    x0 = max(0, int(np.floor(pts[:, 0].min())) - pad)
+    y0 = max(0, int(np.floor(pts[:, 1].min())) - pad)
+    x1 = min(img_w, int(np.ceil(pts[:, 0].max())) + pad)
+    y1 = min(img_h, int(np.ceil(pts[:, 1].max())) + pad)
+    return x0, y0, x1, y1
 
 
-def _valid_crop_bbox(x0: int, y0: int, x1: int, y1: int, w: int, h: int) -> bool:
-    crop_w = x1 - x0
-    crop_h = y1 - y0
-    if crop_w < int(w * 0.2) or crop_h < int(h * 0.2):
-        return False
-    area_ratio = (crop_w * crop_h) / float(w * h)
-    shrunk = crop_w < int(w * 0.98) or crop_h < int(h * 0.98)
-    return shrunk and 0.06 <= area_ratio <= 0.95
-
-
-def auto_crop_receipt(img_pil: Image.Image) -> Tuple[Image.Image, bool]:
-    """
-    Crop the image around the dense text region before line-level OCR.
-
-    This helps when users upload a full-scene image while the model was
-    trained on tighter receipt crops.
-    """
-    w, h = img_pil.size
-    if w < 80 or h < 80:
-        return img_pil, False
-
-    # Downscale for stable and fast mask analysis.
-    scale = max(w, h) / 900.0 if max(w, h) > 900 else 1.0
-    if scale > 1.0:
-        ws = max(1, int(round(w / scale)))
-        hs = max(1, int(round(h / scale)))
-        work = img_pil.resize((ws, hs), Image.LANCZOS)
-    else:
-        work = img_pil
-        ws, hs = w, h
-
-    rgb = np.array(work.convert("RGB"), dtype=np.float32)
-    mx = rgb.max(axis=2)
-    mn = rgb.min(axis=2)
-    luminance = rgb.mean(axis=2)
-
-    # Bright low-chroma regions correspond to receipt paper in table/desk photos.
-    whiteness = luminance - 0.80 * (mx - mn)
-    white_thr = np.percentile(whiteness, 60)
-    paper_mask = (whiteness >= white_thr).astype(np.uint8) * 255
-
-    # Fill text holes and smooth small gaps in the paper mask.
-    mask_img = (
-        Image.fromarray(paper_mask)
-        .filter(ImageFilter.MaxFilter(9))
-        .filter(ImageFilter.MinFilter(9))
-    )
-    mask = np.array(mask_img) > 0
-    bbox = _bbox_from_mask(mask, min_density=0.02)
-    if bbox is None:
-        return img_pil, False
-
-    xs0, ys0, xs1, ys1 = bbox
-    x0 = int(round(xs0 * scale))
-    y0 = int(round(ys0 * scale))
-    x1 = int(round(xs1 * scale))
-    y1 = int(round(ys1 * scale))
-
-    # Slight padding to keep margins around the receipt.
-    pad_x = max(8, int((x1 - x0) * 0.03))
-    pad_y = max(10, int((y1 - y0) * 0.04))
-    x0 = max(0, x0 - pad_x)
-    y0 = max(0, y0 - pad_y)
-    x1 = min(w, x1 + pad_x)
-    y1 = min(h, y1 + pad_y)
-
-    if not _valid_crop_bbox(x0, y0, x1, y1, w, h):
-        return img_pil, False
-    return img_pil.crop((x0, y0, x1, y1)), True
-
-
-def detect_text_bands(
-    img_pil: Image.Image,
+def filter_noise_boxes(
+    bboxes: List[BBox],
+    img_w: int,
+    min_width: int = 20,
     min_height: int = 8,
-    merge_gap: int = 6,
-    pad: int = 3,
-    threshold_scale: float = 0.60,
-) -> list:
-    """
-    Detect horizontal text line bands and return (x0, y0, x1, y1) boxes.
-    """
-    w, h = img_pil.size
-    gray = normalise_receipt(img_pil)
-    blurred = gray.filter(ImageFilter.GaussianBlur(radius=1))
-    arr = np.array(blurred, dtype=np.float32)
-    inv = 255.0 - arr
+    min_area: int = 200,
+) -> List[BBox]:
+    clean: List[BBox] = []
+    for (x0, y0, x1, y1) in bboxes:
+        width = x1 - x0
+        height = y1 - y0
+        area = width * height
+        aspect = width / max(height, 1)
+        if width < min_width:
+            continue
+        if height < min_height:
+            continue
+        if area < min_area:
+            continue
+        if aspect > 30:
+            continue
+        if width > img_w * 0.98:
+            continue
+        clean.append((x0, y0, x1, y1))
+    return clean
 
-    proj = inv.mean(axis=1)
-    nonzero = proj[proj > 1.0]
-    if len(nonzero) == 0:
+
+def group_boxes_into_lines(bboxes: List[BBox], tolerance: float = 0.3) -> List[Dict[str, List[BBox] | BBox]]:
+    if not bboxes:
         return []
 
-    thresh = np.percentile(nonzero, 75) * threshold_scale
-    thresh = max(thresh, 3.0)
+    sorted_boxes = sorted(bboxes, key=lambda b: (b[1] + b[3]) / 2.0)
+    grouped: List[Dict[str, List[BBox] | BBox]] = []
 
-    in_band = False
-    start = 0
-    bands = []
-    for i, val in enumerate(proj):
-        if not in_band and val > thresh:
-            in_band = True
-            start = i
-        elif in_band and val <= thresh:
-            in_band = False
-            if i - start >= min_height:
-                bands.append([start, i])
-    if in_band and h - start >= min_height:
-        bands.append([start, int(h)])
+    for box in sorted_boxes:
+        bx0, by0, bx1, by1 = box
+        b_center = (by0 + by1) / 2.0
+        b_height = by1 - by0
+        placed = False
 
-    merged = []
-    for b in bands:
-        if merged and b[0] - merged[-1][1] <= merge_gap:
-            merged[-1][1] = b[1]
-        else:
-            merged.append(list(b))
+        for line in grouped:
+            lx0, ly0, lx1, ly1 = line["merged"]  # type: ignore[index]
+            l_center = (ly0 + ly1) / 2.0
+            l_height = ly1 - ly0
+            if abs(b_center - l_center) < max(b_height, l_height) * tolerance:
+                words = line["words"]  # type: ignore[index]
+                words.append(box)
+                line["merged"] = (
+                    min(lx0, bx0),
+                    min(ly0, by0),
+                    max(lx1, bx1),
+                    max(ly1, by1),
+                )
+                placed = True
+                break
 
-    bboxes = []
-    for (y0, y1) in merged:
-        band_arr = inv[y0:y1, :]
-        if band_arr.size == 0:
+        if not placed:
+            grouped.append({"words": [box], "merged": box})
+
+    grouped.sort(key=lambda line: line["merged"][1])  # type: ignore[index]
+    normalized: List[Dict[str, List[BBox] | BBox]] = []
+    for line in grouped:
+        words = sorted(line["words"], key=lambda b: b[0])  # type: ignore[index]
+        merged = (
+            min(b[0] for b in words),
+            min(b[1] for b in words),
+            max(b[2] for b in words),
+            max(b[3] for b in words),
+        )
+        normalized.append({"words": words, "merged": merged})
+    return normalized
+
+
+def detect_word_boxes(
+    img_pil: Image.Image,
+    min_word_width: int = 20,
+    min_word_height: int = 8,
+    min_word_area: int = 200,
+) -> List[BBox]:
+    img_w, img_h = img_pil.size
+    img_arr = np.array(img_pil.convert("RGB"))
+    try:
+        detection = craft.detect_text(image=img_arr)
+    except TypeError:
+        detection = craft.detect_text(img_arr)
+
+    quads = detection.get("boxes", []) if isinstance(detection, dict) else []
+    bboxes: List[BBox] = []
+    for quad in quads:
+        try:
+            bboxes.append(quad_to_bbox(quad, img_w, img_h, pad=4))
+        except ValueError:
             continue
-        col_proj = band_arr.max(axis=0)
-        ink_cols = np.where(col_proj > max(thresh * 0.5, 2.0))[0]
-        if len(ink_cols) == 0:
-            continue
-        x0 = max(0, int(ink_cols[0]) - pad * 2)
-        x1 = min(w, int(ink_cols[-1]) + pad * 2)
-        yp0 = max(0, y0 - pad)
-        yp1 = min(h, y1 + pad)
-        bw = x1 - x0
-        bh = yp1 - yp0
-        if bw < 10 or bh < 4:
-            continue
-        bboxes.append((x0, yp0, x1, yp1))
 
-    return bboxes
+    return filter_noise_boxes(
+        bboxes,
+        img_w=img_w,
+        min_width=min_word_width,
+        min_height=min_word_height,
+        min_area=min_word_area,
+    )
 
 
-def _is_band_layout_degenerate(bboxes: list, w: int, h: int) -> bool:
-    if not bboxes:
-        return True
-    if len(bboxes) == 1:
-        x0, y0, x1, y1 = bboxes[0]
-        area_ratio = ((x1 - x0) * (y1 - y0)) / float(max(w * h, 1))
-        return area_ratio > 0.70
-    return False
+def run_ocr_crop(img_pil: Image.Image, bbox: BBox) -> str:
+    x0, y0, x1, y1 = bbox
+    width, height = img_pil.size
+    left = max(0, int(x0))
+    top = max(0, int(y0))
+    right = min(width, int(x1))
+    bottom = min(height, int(y1))
 
+    if right <= left or bottom <= top:
+        return ""
 
-def preprocess_crop(crop: Image.Image) -> Image.Image:
-    """
-    Keep a line-like aspect ratio before TrOCR resize.
-    """
-    crop = crop.convert("RGB")
-    w, h = crop.size
-    if h == 0:
-        return crop
-    aspect = w / h
-    if aspect < MIN_ASPECT:
-        target_w = int(h * MIN_ASPECT)
-        pad_total = target_w - w
-        pad_left = pad_total // 2
-        padded = Image.new("RGB", (target_w, h), (255, 255, 255))
-        padded.paste(crop, (pad_left, 0))
-        return padded
-    return crop
+    crop = img_pil.crop((left, top, right, bottom)).convert("RGB")
+    if crop.width < 8 or crop.height < 8:
+        return ""
 
-
-def run_ocr(crop: Image.Image) -> str:
-    crop = preprocess_crop(crop)
-    pv = processor(images=crop, return_tensors="pt").pixel_values.to(DEVICE)
+    pixel_values = processor(images=crop, return_tensors="pt").pixel_values.to(DEVICE)
     with torch.no_grad():
-        gen = model.generate(pv, max_new_tokens=MAX_NEW_TOKENS)
-    return processor.tokenizer.decode(gen[0], skip_special_tokens=True).strip()
+        generated = model.generate(
+            pixel_values,
+            max_new_tokens=MAX_NEW_TOKENS,
+            num_beams=NUM_BEAMS,
+            early_stopping=True,
+        )
+    return processor.batch_decode(generated, skip_special_tokens=True)[0].strip()
+
+
+def run_ocr_line(img_pil: Image.Image, word_bboxes: List[BBox]) -> str:
+    words: List[str] = []
+    for bbox in sorted(word_bboxes, key=lambda b: b[0]):
+        text = run_ocr_crop(img_pil, bbox)
+        if text:
+            words.append(text)
+    return " ".join(words).strip()
 
 
 PALETTE = [
@@ -252,7 +240,7 @@ PALETTE = [
 ]
 
 
-def draw_annotated(img_pil: Image.Image, bboxes: list, predictions: list) -> Image.Image:
+def draw_annotated(img_pil: Image.Image, bboxes: List[BBox], predictions: List[str]) -> Image.Image:
     out = img_pil.copy().convert("RGBA")
     overlay = Image.new("RGBA", out.size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
@@ -318,6 +306,7 @@ async def health():
         "model": MODEL_PATH,
         "device": str(DEVICE),
         "ui_found": UI_FILE.exists(),
+        "pipeline": "craft+trocr-v3",
     }
 
 
@@ -325,11 +314,18 @@ async def health():
 async def ocr_endpoint(
     file: UploadFile = File(...),
     max_width: int = 1400,
-    min_band_height: int = 8,
-    merge_gap: int = 6,
+    line_tolerance: float = 0.30,
+    min_word_width: int = 20,
+    min_word_height: int = 8,
+    min_word_area: int = 200,
 ):
     if not file.content_type or not file.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="File must be an image.")
+
+    if max_width < 200:
+        raise HTTPException(status_code=400, detail="max_width must be >= 200.")
+    if not 0.05 <= line_tolerance <= 1.0:
+        raise HTTPException(status_code=400, detail="line_tolerance must be in [0.05, 1.0].")
 
     raw = await file.read()
     if not raw:
@@ -345,45 +341,37 @@ async def ocr_endpoint(
         scale = max_width / w
         img = img.resize((int(w * scale), int(h * scale)), Image.LANCZOS)
 
-    receipt_img, was_cropped = auto_crop_receipt(img)
+    try:
+        word_boxes = detect_word_boxes(
+            img,
+            min_word_width=min_word_width,
+            min_word_height=min_word_height,
+            min_word_area=min_word_area,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"CRAFT detection failed: {exc}") from exc
 
-    bboxes = detect_text_bands(
-        receipt_img,
-        min_height=min_band_height,
-        merge_gap=merge_gap,
-        threshold_scale=0.60,
-    )
-    if _is_band_layout_degenerate(bboxes, receipt_img.width, receipt_img.height):
-        bboxes = detect_text_bands(
-            receipt_img,
-            min_height=max(5, min_band_height - 2),
-            merge_gap=merge_gap + 2,
-            threshold_scale=0.48,
-            pad=4,
-        )
-    if _is_band_layout_degenerate(bboxes, receipt_img.width, receipt_img.height):
-        bboxes = detect_text_bands(
-            receipt_img,
-            min_height=max(4, min_band_height - 3),
-            merge_gap=merge_gap + 4,
-            threshold_scale=0.36,
-            pad=4,
-        )
+    line_groups = group_boxes_into_lines(word_boxes, tolerance=line_tolerance)
+    bboxes: List[BBox] = []
+    predictions: List[str] = []
+    for group in line_groups:
+        words = group["words"]  # type: ignore[assignment]
+        merged = group["merged"]  # type: ignore[assignment]
+        text = run_ocr_line(img, words)  # type: ignore[arg-type]
+        bboxes.append(merged)  # type: ignore[arg-type]
+        predictions.append(text)
+
     if not bboxes:
-        bboxes = [(0, 0, receipt_img.width, receipt_img.height)]
-
-    predictions = []
-    for (x0, y0, x1, y1) in bboxes:
-        crop = receipt_img.crop((x0, y0, x1, y1))
-        predictions.append(run_ocr(crop) or "")
+        bboxes = [(0, 0, img.width, img.height)]
+        predictions = [run_ocr_crop(img, bboxes[0])]
 
     if not any(text.strip() for text in predictions):
-        bboxes = [(0, 0, receipt_img.width, receipt_img.height)]
-        predictions = [run_ocr(receipt_img) or ""]
+        bboxes = [(0, 0, img.width, img.height)]
+        predictions = [run_ocr_crop(img, bboxes[0])]
 
-    annotated = draw_annotated(receipt_img, bboxes, predictions)
+    annotated = draw_annotated(img, bboxes, predictions)
 
-    lines = []
+    lines: List[LineResult] = []
     for i, ((x0, y0, x1, y1), text) in enumerate(zip(bboxes, predictions)):
         conf = "high" if len(text) > 4 else ("medium" if len(text) > 1 else "low")
         lines.append(
@@ -398,13 +386,13 @@ async def ocr_endpoint(
             )
         )
 
-    rw, rh = receipt_img.size
-    full_text = "\n".join(l.text for l in lines if l.text)
+    rw, rh = img.size
+    full_text = "\n".join(line.text for line in lines if line.text)
     return OCRResponse(
         lines=lines,
         annotated_image=pil_to_b64(annotated),
-        cropped_image=pil_to_b64(receipt_img),
-        receipt_cropped=was_cropped,
+        cropped_image=pil_to_b64(img),
+        receipt_cropped=False,
         total_lines=len(lines),
         image_size=f"{rw}x{rh}px",
         device=str(DEVICE).upper(),
